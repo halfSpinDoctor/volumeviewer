@@ -41,9 +41,13 @@ function varargout = vvi(varargin)
 %
 % Samuel A. Hurley
 % University of Wisconsin
-% v1.0  23-Aug-2010
+% v1.1  10-May-2011
+%
+% Changelog:
+%     v1.0 Initial version 23-Aug-2011
+%     v1.1 Added Mag/Phase/Real/Imag Options
 
-% Last Modified by GUIDE v2.5 29-Sep-2010 10:03:38
+% Last Modified by GUIDE v2.5 10-May-2011 17:40:46
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -86,6 +90,7 @@ handles.vvi.currentSlice = 1;
 handles.vvi.currentPhase = 1;
 handles.vvi.imageSize    = [20 20 1 1];
 handles.vvi.montage      = 0;
+handles.vvi.complexMode  = 0;  % 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
 
 % Populate image with Matlab logo
 imageLogo(handles);
@@ -299,8 +304,15 @@ else
 end
 
 % Grab the min & max
-handles.vvi.min = min(img(:));
-handles.vvi.max = max(img(:));
+handles.vvi.min = min(abs(img(:)));
+handles.vvi.max = max(abs(img(:)));
+
+if handles.vvi.min < 0
+  handles.vvi.min = 0;
+elseif handles.vvi.min > handles.vvi.max
+  % Set minimum to 90% lower than max.
+  handles.vvi.min = handles.vvi.max * .9;
+end
 
 % Set the value of the txt boxes
 set(handles.editMin, 'String', num2str(handles.vvi.min));
@@ -463,11 +475,18 @@ function pushFigure_Callback(hObject, eventdata, handles)
 
 % Call is same as imageDisp, but with a new figure
 figure;
+
 if handles.vvi.montage == 0
-  imagesc(abs(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase)), [handles.vvi.min handles.vvi.max]);
+  if handles.vvi.complexMode == 4
+    tmp = phplot(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase),handles.vvi.max);
+    imagesc(tmp);
+  else
+    imagesc(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+  end
+  
 elseif handles.vvi.montage == 1
   % Show all slices of 1 phase
-  imgsc(abs(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase)), [handles.vvi.min handles.vvi.max]);
+  imgsc(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
 end
 
 colormap(handles.vvi.colormap);
@@ -497,10 +516,16 @@ fileName      = inputdlg('Image Filename:');
 
 figure;
 if handles.vvi.montage == 0
-  imagesc(abs(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase)), [handles.vvi.min handles.vvi.max]);
+  if handles.vvi.complexMode == 4
+    tmp = phplot(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
+    imagesc(tmp);
+  else
+    imagesc(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+  end
+  
 elseif handles.vvi.montage == 1
   % Show all slices of 1 phase
-  imgsc(abs(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase)), [handles.vvi.min handles.vvi.max]);
+  imgsc(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
 end
 
 colormap(handles.vvi.colormap);
@@ -579,14 +604,21 @@ light('Position',[.5 -1 .4], ...
 % --- Display image on mainAxes ---
 function imageDisp(handles)
 
-axes(handles.mainAxes);
+axes(handles.mainAxes); %#ok<MAXES>
+
 if handles.vvi.montage == 0
-  handles.vvi.imagescHandle = imagesc(abs(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase)), [handles.vvi.min handles.vvi.max]);
+  if handles.vvi.complexMode == 4
+    tmp = phplot(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
+    imagesc(tmp);
+  else
+    imagesc(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+  end
+  
 elseif handles.vvi.montage == 1
   % Show all slices of 1 phase
-  clear handles.vvi.imagescHandle;
-  imgsc(abs(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase)), [handles.vvi.min handles.vvi.max]);
+  imgsc(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
 end
+
 colormap(handles.vvi.colormap);
 axis image;
 axis off;
@@ -612,8 +644,22 @@ if ischar(img)
 else
   % If its larger than 4-D, remove higher dimensions
   if ndims(img) > 4
-    img = img(:,:,:,:,1,1,1,1,1,1,1,1,1);
+    img = img(:,:,:,:,1,1,1,1,1,1,1,1,1,1,1,1,1,1);
     textMessage(handles, 'info', 'Only first 4D of image loaded.');
+  end
+  
+  % Take mag/phase/real/imag as appropriate
+  switch handles.vvi.complexMode
+    case 0
+      img = abs(img);
+    case 1
+      img = angle(img);
+    case 2
+      img = real(img);
+    case 3
+      img = imag(img);
+    case 4
+      % Do nothing here
   end
   
   % Update current image
@@ -623,11 +669,13 @@ else
   handles.vvi.currentName = get(handles.editVar, 'String');
   
   % Grab the min & max
-  handles.vvi.min = min(img(:));
-  handles.vvi.max = max(img(:));
+  handles.vvi.min = min(abs(img(:)));
+  handles.vvi.max = max(abs(img(:)));
   
-  if handles.vvi.min > handles.vvi.max
-    handles.vvi.max = handles.vvi.min + 1;
+  if handles.vvi.min < 0
+    handles.vvi.min = 0;
+  elseif handles.vvi.min > handles.vvi.max
+    handles.vvi.min = handles.vvi.max * 0.90;
   end
   
   % Set the value of the txt boxes
@@ -752,3 +800,106 @@ function editPhase_CreateFcn(hObject, eventdata, handles)
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
+
+
+% --- Executes on selection change in popupComplex.
+function popupComplex_Callback(hObject, eventdata, handles)
+% hObject    handle to popupComplex (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hints: contents = cellstr(get(hObject,'String')) returns popupComplex contents as cell array
+%        contents{get(hObject,'Value')} returns selected item from popupComplex
+
+% Get the selected colormap
+contents = cellstr(get(hObject,'String'));
+cm       = strtrim(contents{get(hObject,'Value')});
+
+% Check for custom maps jet2 or hsv2
+if strcmp(cm, 'Magnitude')
+  handles.vvi.complexMode = 0;
+  
+elseif strcmp(cm, 'Phase')
+  handles.vvi.complexMode = 1;
+  
+elseif strcmp(cm, 'Real')
+  handles.vvi.complexMode = 2;
+  
+elseif strcmp(cm, 'Imag')
+  handles.vvi.complexMode = 3;
+
+else
+  % Colour Phase
+  handles.vvi.complexMode = 4;
+end
+
+% Update image
+handles = loadImage(handles);
+
+% Display the image
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes during object creation, after setting all properties.
+function popupComplex_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to popupComplex (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: popupmenu controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+function varargout=phplot(varargin)
+
+%PHPLOT(FIELD)
+%Plots the phase of FIELD in a continuous color scale (hue) and represents
+%the normalized amplitude as brightness (r+g+b)*amplitude.
+%PHPLOT(FIELD,AMP,FLAG)
+%If AMP = 0 the amplitude is not plot
+%If FLAG = 1 the function creates a figure with a dial scale (from 0 to
+%2*pi) and radial brightness (from 0 to one)
+%A=PHPLOT(...) creates a 3D uint8 array that can be saved as an image with
+%IMWRITE(A,'filename','fmt').
+%Iacopo Mochi, Lawrence Berkeley National Laboratory 06/6/2010
+
+
+% Copyright (c) 2010, Iacopo Mochi
+% All rights reserved.
+
+% Modified by Samuel A. Hurley
+%             University of Wisconsin
+%             vUW1.0 7-Jun-2010
+
+field=varargin{1};
+Amp=varargin{2};
+
+Im=imag(field);
+Re=real(field);
+
+phase=atan2(Im,Re);
+amplitude=abs(field);
+if Amp > 0
+  amplitude=amplitude/Amp;
+  amplitude(amplitude>1) = 1;
+else
+  amplitude=amplitude/max(amplitude(:));
+end
+
+if Amp==0
+    amplitude=ones(size(amplitude));
+end
+A=zeros(size(field,1),size(field,2),3);     %Declare RGB array
+
+A(:,:,1)=0.5*(sin(phase)+1).*amplitude;     %Red
+A(:,:,2)=0.5*(sin(phase+pi/2)+1).*amplitude;%Green
+A(:,:,3)=0.5*(-sin(phase)+1).*amplitude;    %Blue
+
+
+A=uint8(A*255);
+varargout{1}=A;
