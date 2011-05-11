@@ -855,6 +855,8 @@ if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgr
     set(hObject,'BackgroundColor','white');
 end
 
+% ==== External Programs Below ==============
+
 function varargout=phplot(varargin)
 
 %PHPLOT(FIELD)
@@ -903,3 +905,55 @@ A(:,:,3)=0.5*(-sin(phase)+1).*amplitude;    %Blue
 
 A=uint8(A*255);
 varargout{1}=A;
+
+% FUNCTION [] = imgsc(img, window, range)
+%
+% Display a montage of a 3D grayscale image
+%
+% Inputs:
+%   img    - the input image
+%   window - the slices you wish to view
+%   range  - the range of values to map to the color scale
+%
+% Samuel A. Hurley
+% University of Wisconsin
+% v1.2 7-Jun-2010
+%
+% Changelog
+%    v1.0  Initial version, roughly based off of Alexey's imsc command (2008)
+%    v1.1  Added squeeze(img).  Clean up documentation (May 2010)
+%    v1.2  Added ability to plot complex data using the phplot command,
+%          phase data represented in colour (Jun 2010)
+%    v1.3  Changed name to imgsc so as to not interfere with Alexey's version
+
+function imgsc(img, window, range)
+
+% Remove non-singleton dimensions
+img = squeeze(img);
+
+% if the data are > 3-d, use first volume
+if ndims(img) > 3
+  img = img(:,:,:,1,1,1,1,1,1);
+end
+
+if exist('window', 'var') == 0 || size(window, 1) == 0
+  window(1) = 0;
+  window(2) = max(img(:));
+end
+
+if exist('range', 'var') == 0
+  range(1) = 1;
+  range(2) = size(img, 3);
+end
+
+% if the data are complex, use a phplot
+if ~isreal(img)
+  for ii = 1:size(img, 3)
+    img1(:,:,:,ii) = phplot(img(:,:,ii), window(2)); %#ok<AGROW>
+  end
+  montage(img1(:,:,:,range(1):range(2)));
+else
+  % Grayscale img
+  img1(:,:,1,:) = img;
+  montage(img1(:,:,1,range(1):range(2)), 'DisplayRange', window);
+end
