@@ -38,15 +38,21 @@ function varargout = vvi(varargin)
 %      loadImage   - load in an image from the base workspace into vvi
 %      textMessage - display a custom  message in the terminal & on image
 %
+% Builtin Dependancies
+%      phplot      - converts a complex dataset into a color-modulated image to visualize
+%                    phase and magnitude at the same time
+%      imgsc       - image montage viewer
+%
 %
 % Samuel A. Hurley
 % University of Wisconsin
-% v1.1  10-May-2011
+% v1.2  11-May-2011
 %
 % Changelog:
 %     v1.0 Initial version 23-Aug-2011
-%     v1.1 Added Mag/Phase/Real/Imag Options
-
+%     v1.1 Added Mag/Phase/Real/Imag Options (May-2011)
+%     v1.2 Added phplot() and imgsc() directly into vvi code to eliminate external
+%          dependancies (May-2011)
 % Last Modified by GUIDE v2.5 10-May-2011 17:40:46
 
 % Begin initialization code - DO NOT EDIT
@@ -307,9 +313,7 @@ end
 handles.vvi.min = min(abs(img(:)));
 handles.vvi.max = max(abs(img(:)));
 
-if handles.vvi.min < 0
-  handles.vvi.min = 0;
-elseif handles.vvi.min > handles.vvi.max
+if handles.vvi.min > handles.vvi.max
   % Set minimum to 90% lower than max.
   handles.vvi.min = handles.vvi.max * .9;
 end
@@ -662,6 +666,10 @@ else
       % Do nothing here
   end
   
+  % Remove NaN and Infs from the image
+  img(isinf(img)) = 0;
+  img(isnan(img)) = 0;
+  
   % Update current image
   handles.vvi.currentImage = double(img);
   
@@ -672,9 +680,7 @@ else
   handles.vvi.min = min(abs(img(:)));
   handles.vvi.max = max(abs(img(:)));
   
-  if handles.vvi.min < 0
-    handles.vvi.min = 0;
-  elseif handles.vvi.min > handles.vvi.max
+  if handles.vvi.min > handles.vvi.max
     handles.vvi.min = handles.vvi.max * 0.90;
   end
   
