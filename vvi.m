@@ -53,7 +53,10 @@ function varargout = vvi(varargin)
 %     v1.1 Added Mag/Phase/Real/Imag Options (May-2011)
 %     v1.2 Added phplot() and imgsc() directly into vvi code to eliminate external
 %          dependancies (May-2011)
-% Last Modified by GUIDE v2.5 10-May-2011 17:40:46
+%     v1.3 Added support for opening up structs of images.  Fixed colormap buttons
+%          Fixed up functionality of loadVars so it will not load non-images
+%
+% Last Modified by GUIDE v2.5 15-May-2011 19:03:56
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -133,9 +136,6 @@ function listVars_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Update the list of workspace variables
-handles = loadVars(handles);
-
 % Get the current selected
 x = get(handles.listVars, 'Value');
 y = strtrim(handles.vvi.currentVars(x, :));
@@ -187,6 +187,9 @@ function pushImg_Callback(hObject, eventdata, handles)
 % hObject    handle to pushImg (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
+
+% Update the listed variables
+handles = loadVars(handles);
 
 % Load in image to workspace
 handles = loadImage(handles);
@@ -554,12 +557,36 @@ saveas(gcf, fileName{1});
 % --- Populate the list with workspace variables
 function handles = loadVars(handles)
 
-x = evalin('base', 'who');
+x = evalin('base', 'whos');
+
+% Temporary cell array for storing image variable names
+z = cell(0);
+
+% Loop thru vars and check for images & structs
+for ii = 1:size(x, 1)
+  
+  % Loop into struct
+  if strcmp(x(ii).class, 'struct')
+    % Loop thru all field names in the struct
+    fn = evalin('base', ['fieldnames(' x(ii).name ');']);
+    
+    for jj = 1:size(fn, 1)
+      if evalin('base', ['size(' x(ii).name '(1).' fn{jj} ', 1) > 1']) && evalin('base', ['size(' x(ii).name '(1).' fn{jj} ', 2) > 1'])
+        z = [z [x(ii).name '.' fn{jj}]]; %#ok<*AGROW>
+      end
+    end
+  end
+  
+  % An image must be larger than 1x2
+  if x(ii).size(1) > 2 && x(ii).size(2) > 2
+    z = [z x(ii).name];
+  end
+end
 
 % Convert from cell array to string
 handles.vvi.currentVars = [];
-for ii = 1:size(x, 1)
-  handles.vvi.currentVars = strvcat(handles.vvi.currentVars, x{ii}); %#ok<VCAT>
+for ii = 1:size(z, 2)
+  handles.vvi.currentVars = strvcat(handles.vvi.currentVars, z{ii}); %#ok<REMFF1>
 end
 
 % Update the string in listVars
@@ -640,74 +667,78 @@ catch
   return;
 end
 
-% Check to make sure its an image
+% If its larger than 4-D, remove higher dimensions
+if ndims(img) > 4
+  img = img(:,:,:,:,1,1,1,1,1,1,1,1,1,1,1,1,1,1);
+  textMessage(handles, 'info', 'Only first 4D of image loaded.');
+end
 
-if ischar(img)
-  textMessage(handles, 'info', img);
+% Check if the image is complex
+if isreal(img)
+  % Disable the mag/phase/real/imag control
+  handles.vvi.complexMode = 0;
+  set(handles.popupComplex, 'Enable', 'off');
   
 else
-  % If its larger than 4-D, remove higher dimensions
-  if ndims(img) > 4
-    img = img(:,:,:,:,1,1,1,1,1,1,1,1,1,1,1,1,1,1);
-    textMessage(handles, 'info', 'Only first 4D of image loaded.');
-  end
-  
-  % Take mag/phase/real/imag as appropriate
-  switch handles.vvi.complexMode
-    case 0
-      img = abs(img);
-    case 1
-      img = angle(img);
-    case 2
-      img = real(img);
-    case 3
-      img = imag(img);
-    case 4
-      % Do nothing here
-  end
-  
-  % Remove NaN and Infs from the image
-  img(isinf(img)) = 0;
-  img(isnan(img)) = 0;
-  
-  % Update current image
-  handles.vvi.currentImage = double(img);
-  
-  % Update the image name
-  handles.vvi.currentName = get(handles.editVar, 'String');
-  
-  % Grab the min & max
-  handles.vvi.min = min(abs(img(:)));
-  handles.vvi.max = max(abs(img(:)));
-  
-  if handles.vvi.min > handles.vvi.max
-    handles.vvi.min = handles.vvi.max * 0.90;
-  end
-  
-  % Set the value of the txt boxes
-  set(handles.editMin, 'String', num2str(handles.vvi.min));
-  set(handles.editMax, 'String', num2str(handles.vvi.max));
-  
-  % Get the size of the image
-  handles.vvi.imageSize = size(img);
-  
-  % Fix size for 2-D and 3-D images
-  if ndims(img) < 4
-    handles.vvi.imageSize(4) = 1;
-  elseif ndims(img) < 3
-    handles.vvi.imageSize(3) = 1;
-    handles.vvi.imageSize(4) = 1;
-  end
-  
-  % Take middle slice as current slice
-  handles.vvi.currentSlice = round(size(img, 3)/2);
-  set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
-  
-  % Take the first phase as default
-  handles.vvi.currentPhase = 1;
-  set(handles.editPhase, 'String', num2str(handles.vvi.currentPhase));
+  set(handles.popupComplex, 'Enable', 'on');
   
 end
+
+% Take mag/phase/real/imag as appropriate
+switch handles.vvi.complexMode
+  case 0
+    img = abs(img);
+  case 1
+    img = angle(img);
+  case 2
+    img = real(img);
+  case 3
+    img = imag(img);
+  case 4
+    % Do nothing here
+end
+
+% Remove NaN and Infs from the image
+img(isinf(img)) = 0;
+img(isnan(img)) = 0;
+
+% Update current image
+handles.vvi.currentImage = double(img);
+
+% Update the image name
+handles.vvi.currentName = get(handles.editVar, 'String');
+
+% Grab the min & max
+handles.vvi.min = min(abs(img(:)));
+handles.vvi.max = max(abs(img(:)));
+
+if handles.vvi.min > handles.vvi.max
+  handles.vvi.min = handles.vvi.max * 0.90;
+end
+
+% Set the value of the txt boxes
+set(handles.editMin, 'String', num2str(handles.vvi.min));
+set(handles.editMax, 'String', num2str(handles.vvi.max));
+
+% Get the size of the image
+handles.vvi.imageSize = size(img);
+
+% Fix size for 2-D and 3-D images
+if ndims(img) < 4
+  handles.vvi.imageSize(4) = 1;
+elseif ndims(img) < 3
+  handles.vvi.imageSize(3) = 1;
+  handles.vvi.imageSize(4) = 1;
+end
+
+% Take middle slice as current slice
+handles.vvi.currentSlice = round(size(img, 3)/2);
+set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
+
+% Take the first phase as default
+handles.vvi.currentPhase = 1;
+set(handles.editPhase, 'String', num2str(handles.vvi.currentPhase));
+
 
 % --- Display a text message, both on the image itself and the command window ---
 function textMessage(handles, type, msg)
@@ -822,6 +853,8 @@ contents = cellstr(get(hObject,'String'));
 cm       = strtrim(contents{get(hObject,'Value')});
 
 % Check for custom maps jet2 or hsv2
+set(handles.popupColormap, 'Enable', 'on');    % Re-enable colormap choice
+
 if strcmp(cm, 'Magnitude')
   handles.vvi.complexMode = 0;
   
@@ -837,6 +870,9 @@ elseif strcmp(cm, 'Imag')
 else
   % Colour Phase
   handles.vvi.complexMode = 4;
+  
+  % Disable colormap choice
+  set(handles.popupColormap, 'Enable', 'off');  % Disable colormap for mode 4
 end
 
 % Update image
