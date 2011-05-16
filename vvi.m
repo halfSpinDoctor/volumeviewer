@@ -547,7 +547,7 @@ title(figureCaption, 'FontSize', 12);
 colorbar;
 
 % Save
-saveas(gcf, fileName{1});
+savefig(fileName{1});
 
 
 
