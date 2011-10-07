@@ -20,7 +20,8 @@ function varargout = vvi(varargin)
 %
 %
 % Custom Options Variable (handles.vvi)
-%      currentImage - the current image being displayed
+%      currentImage - the current loaded image (may be complex)
+%      displayImage - the current form of the image actually displayed
 %      currentName  - the name of the variable or expression being imaged
 %      min          - the minimum intensity to display
 %      max          - the maximum intensity to display
@@ -31,8 +32,11 @@ function varargout = vvi(varargin)
 %      currentVars  - the current workspace variables
 %      montage      - 0 = use imagesc,  1 = use imsc
 %
+%      complexMode  - 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
+%
 % Custom Functions
 %      imageDisp   - display an image with custom scale [min max] and custom colormap
+%      updateCplx  - update the complex representation of the image (ABS/MAG/REAL/IMAG/CPHASE)
 %      imageLogo   - display the Matlab logo
 %      loadVars    - refresh list of base workspace variables
 %      loadImage   - load in an image from the base workspace into vvi
@@ -46,7 +50,7 @@ function varargout = vvi(varargin)
 %
 % Samuel A. Hurley
 % University of Wisconsin
-% v1.2  11-May-2011
+% v2.0 29-Sept-2011
 %
 % Changelog:
 %     v1.0 Initial version 23-Aug-2011
@@ -54,9 +58,14 @@ function varargout = vvi(varargin)
 %     v1.2 Added phplot() and imgsc() directly into vvi code to eliminate external
 %          dependancies (May-2011)
 %     v1.3 Added support for opening up structs of images.  Fixed colormap buttons
-%          Fixed up functionality of loadVars so it will not load non-images
+%          Fixed up functionality of loadVars so it will not load
+%          non-images (May-2011)
 %
-% Last Modified by GUIDE v2.5 15-May-2011 19:03:56
+%     v2.0 Tabbed interface for load/fft/stats. Switching from Mag/Phase/Real/Imag 
+%          does not require re-loading of image (and thus does not reset slice/phase #)
+%          Fixed bug setting initial min & max when the image is complex (Sep-2011)
+%
+% Last Modified by GUIDE v2.5 04-Oct-2011 13:08:26
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -79,7 +88,7 @@ end
 
 
 % --- Executes just before vvi is made visible.
-function vvi_OpeningFcn(hObject, eventdata, handles, varargin)
+function vvi_OpeningFcn(hObject, eventdata, handles, varargin) %#ok<*INUSL>
 % This function has no output args, see OutputFcn.
 % hObject    handle to figure
 % eventdata  reserved - to be defined in a future version of MATLAB
@@ -123,7 +132,7 @@ varargout{1} = handles.output;
 
 
 % --- Executes during object creation, after setting all properties.
-function mainAxes_CreateFcn(hObject, eventdata, handles)
+function mainAxes_CreateFcn(hObject, eventdata, handles) %#ok<*INUSD,*DEFNU>
 % hObject    handle to mainAxes (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    empty - handles not created until after all CreateFcns called
@@ -305,20 +314,30 @@ function pushLevel_Callback(hObject, eventdata, handles)
 % Sets min an max based on min & max of currently displayed image
 if handles.vvi.montage == 1
   % Use phase min & max for montage
-  img = handles.vvi.currentImage(:,:,:, handles.vvi.currentPhase);
+  img = handles.vvi.displayImage(:,:,:, handles.vvi.currentPhase);
   
 else
   % Use slice min & max for standard
-  img = handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase);
+  img = handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase);
 end
 
 % Grab the min & max
-handles.vvi.min = min(abs(img(:)));
-handles.vvi.max = max(abs(img(:)));
+handles.vvi.min = min(img(:));
+handles.vvi.max = max(img(:));
+
+if ~isreal(handles.vvi.min) || ~isreal(handles.vvi.max)
+  handles.vvi.min = abs(handles.vvi.min);
+  handles.vvi.max = abs(handles.vvi.max);
+end
+
+if handles.vvi.max == 0
+  % Just set to 1 if image is blank
+  handles.vvi.max = 1;
+end
 
 if handles.vvi.min > handles.vvi.max
-  % Set minimum to 90% lower than max.
-  handles.vvi.min = handles.vvi.max * .9;
+  % Set minimum to 10% of max.
+  handles.vvi.min = handles.vvi.max * .10;
 end
 
 % Set the value of the txt boxes
@@ -454,7 +473,7 @@ function pushPermute_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 % Swap slice & phase index (in order to do montage with phases instead of slices)
-handles.vvi.currentImage = permute(handles.vvi.currentImage, [1 2 4 3]);
+handles.vvi.displayImage = permute(handles.vvi.displayImage, [1 2 4 3]);
 size = handles.vvi.imageSize;
 handles.vvi.imageSize(3) = size(4);
 handles.vvi.imageSize(4) = size(3);
@@ -485,15 +504,15 @@ figure;
 
 if handles.vvi.montage == 0
   if handles.vvi.complexMode == 4
-    tmp = phplot(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase),handles.vvi.max);
+    tmp = phplot(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase),handles.vvi.max);
     imagesc(tmp);
   else
-    imagesc(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+    imagesc(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
   end
   
 elseif handles.vvi.montage == 1
   % Show all slices of 1 phase
-  imgsc(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+  imgsc(handles.vvi.displayImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
 end
 
 colormap(handles.vvi.colormap);
@@ -524,15 +543,15 @@ fileName      = inputdlg('Image Filename:');
 figure;
 if handles.vvi.montage == 0
   if handles.vvi.complexMode == 4
-    tmp = phplot(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
+    tmp = phplot(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
     imagesc(tmp);
   else
-    imagesc(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+    imagesc(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
   end
   
 elseif handles.vvi.montage == 1
   % Show all slices of 1 phase
-  imgsc(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+  imgsc(handles.vvi.displayImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
 end
 
 colormap(handles.vvi.colormap);
@@ -586,7 +605,7 @@ end
 % Convert from cell array to string
 handles.vvi.currentVars = [];
 for ii = 1:size(z, 2)
-  handles.vvi.currentVars = strvcat(handles.vvi.currentVars, z{ii}); %#ok<REMFF1>
+  handles.vvi.currentVars = strvcat(handles.vvi.currentVars, z{ii}); %#ok<VCAT,REMFF1>
 end
 
 % Update the string in listVars
@@ -639,21 +658,48 @@ axes(handles.mainAxes); %#ok<MAXES>
 
 if handles.vvi.montage == 0
   if handles.vvi.complexMode == 4
-    tmp = phplot(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
+    tmp = phplot(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
     imagesc(tmp);
   else
-    imagesc(handles.vvi.currentImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+    imagesc(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
   end
   
 elseif handles.vvi.montage == 1
   % Show all slices of 1 phase
-  imgsc(handles.vvi.currentImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
+  disp(size(handles.vvi.displayImage));
+  imgsc(handles.vvi.displayImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
 end
 
 colormap(handles.vvi.colormap);
 axis image;
 axis off;
 colorbar;
+
+% --- Update the complex representation of an image ---
+function handles = updateCplx(handles)
+
+img = handles.vvi.currentImage;
+
+% Take mag/phase/real/imag as appropriate
+switch handles.vvi.complexMode
+  case 0
+    img = double(abs(img));
+  case 1
+    img = double(angle(img));
+  case 2
+    img = double(real(img));
+  case 3
+    img = double(imag(img));
+  case 4
+    % Do nothing here
+end
+
+% Remove NaN and Infs from the image
+img(isinf(img)) = 0;
+img(isnan(img)) = 0;
+
+% Store img in displayImage
+handles.vvi.displayImage = img;
 
 
 % -- Load in an image from base workspace to vvi ---
@@ -662,7 +708,7 @@ function handles = loadImage(handles)
 % Try to grab the image into the workspace
 try
   img = double(evalin('base', get(handles.editVar, 'String')));
-catch
+catch %#ok<CTCH>
   textMessage(handles, 'err', 'Incomplete or incorrect statement');
   return;
 end
@@ -673,7 +719,7 @@ if ndims(img) > 4
   textMessage(handles, 'info', 'Only first 4D of image loaded.');
 end
 
-% Check if the image is complex
+% Check if the image is complex to disable the popupComplex control
 if isreal(img)
   % Disable the mag/phase/real/imag control
   handles.vvi.complexMode = 0;
@@ -684,36 +730,37 @@ else
   
 end
 
-% Take mag/phase/real/imag as appropriate
-switch handles.vvi.complexMode
-  case 0
-    img = abs(img);
-  case 1
-    img = angle(img);
-  case 2
-    img = real(img);
-  case 3
-    img = imag(img);
-  case 4
-    % Do nothing here
-end
-
-% Remove NaN and Infs from the image
-img(isinf(img)) = 0;
-img(isnan(img)) = 0;
+% v2.0: Store the complex image in handles.vvi.currentImage,
+%       and define a new function displayImage to hold
+%       the image after the abs/angle/real/imag operation
+%       has been done
 
 % Update current image
-handles.vvi.currentImage = double(img);
+handles.vvi.currentImage = img;
 
 % Update the image name
 handles.vvi.currentName = get(handles.editVar, 'String');
 
+% Update the complex representation of the image in handles.vvi.displayImage
+handles = updateCplx(handles);
+
 % Grab the min & max
-handles.vvi.min = min(abs(img(:)));
-handles.vvi.max = max(abs(img(:)));
+handles.vvi.min = min(img(:));
+handles.vvi.max = max(img(:));
+
+% We don't want complex numbers here
+if ~isreal(handles.vvi.min) || ~isreal(handles.vvi.max)
+  handles.vvi.min = abs(handles.vvi.min);
+  handles.vvi.max = abs(handles.vvi.max);
+end
+
+if handles.vvi.max == 0
+  % If the image is totally blank, just set it to 1
+  handles.vvi.max = 1;
+end
 
 if handles.vvi.min > handles.vvi.max
-  handles.vvi.min = handles.vvi.max * 0.90;
+  handles.vvi.min = handles.vvi.max * 0.10;
 end
 
 % Set the value of the txt boxes
@@ -764,7 +811,7 @@ function textMessage(handles, type, msg)
 pause(1);
 
 
-% ======= Unused Callbacks Below =====================================
+% ======= More Callbacks Below =====================================
 % Required to be here in order to avoid errors when clicking on 
 % certain GUI elements
 
@@ -876,7 +923,7 @@ else
 end
 
 % Update image
-handles = loadImage(handles);
+handles = updateCplx(handles);
 
 % Display the image
 imageDisp(handles);
@@ -896,6 +943,48 @@ function popupComplex_CreateFcn(hObject, eventdata, handles)
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
+
+% --- Executes on button press in pushLoad.
+function pushLoad_Callback(hObject, eventdata, handles)
+% hObject    handle to pushLoad (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Make The Active Button Green, All Others Gray
+set(handles.pushLoad, 'BackgroundColor', [.757 .867 .776]);
+set(handles.pushFFT,  'BackgroundColor', [.800 .800 .800]);
+set(handles.pushStats,'BackgroundColor', [.800 .800 .800]);
+
+% Make this panel visible, hide all others
+set(handles.panelVars, 'Visible', 'on');
+set(handles.panelFFT,  'Visible', 'off');
+
+% --- Executes on button press in pushFFT.
+function pushFFT_Callback(hObject, eventdata, handles)
+% hObject    handle to pushFFT (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Make The Active Button Green, All Others Gray
+set(handles.pushLoad, 'BackgroundColor', [.800 .800 .800]);
+set(handles.pushFFT,  'BackgroundColor', [.757 .867 .776]);
+set(handles.pushStats,'BackgroundColor', [.800 .800 .800]);
+
+% Make this panel visible, hide all others
+set(handles.panelVars, 'Visible', 'off');
+set(handles.panelFFT,  'Visible', 'on');
+
+% --- Executes on button press in pushStats.
+function pushStats_Callback(hObject, eventdata, handles)
+% hObject    handle to pushStats (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Make The Active Button Green, All Others Gray
+set(handles.pushLoad, 'BackgroundColor', [.800 .800 .800]);
+set(handles.pushFFT,  'BackgroundColor', [.800 .800 .800]);
+set(handles.pushStats,'BackgroundColor', [.757 .867 .776]);
+
 
 % ==== External Programs Below ==============
 
