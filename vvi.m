@@ -33,6 +33,8 @@ function varargout = vvi(varargin)
 %      montage      - 0 = use imagesc,  1 = use imsc
 %
 %      complexMode  - 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
+%      fftMode      - 1st digit 0 = Img Space 1 = 2D, 2 = 3D
+%                     2nd digit 0 = no shift  1 = Pre 2 = Post 3 = Both
 %
 % Custom Functions
 %      imageDisp   - display an image with custom scale [min max] and custom colormap
@@ -64,8 +66,10 @@ function varargout = vvi(varargin)
 %     v2.0 Tabbed interface for load/fft/stats. Switching from Mag/Phase/Real/Imag 
 %          does not require re-loading of image (and thus does not reset slice/phase #)
 %          Fixed bug setting initial min & max when the image is complex (Sep-2011)
+%     v2.1 Changed FFT to 'Processing,' added options for resampling images
+%          especially when you permute axes for non-isotropic scans.
 %
-% Last Modified by GUIDE v2.5 04-Oct-2011 13:08:26
+% Last Modified by GUIDE v2.5 11-Oct-2011 10:56:04
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -108,7 +112,8 @@ handles.vvi.currentSlice = 1;
 handles.vvi.currentPhase = 1;
 handles.vvi.imageSize    = [20 20 1 1];
 handles.vvi.montage      = 0;
-handles.vvi.complexMode  = 0;  % 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
+handles.vvi.complexMode  = 0;  % 0  = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
+handles.vvi.fftMode      = 00; % 00 = Image Space
 
 % Populate image with Matlab logo
 imageLogo(handles);
@@ -680,6 +685,46 @@ function handles = updateCplx(handles)
 
 img = handles.vvi.currentImage;
 
+% Take FFT First, if necessary
+if handles.vvi.fftMode > 0 && handles.vvi.fftMode < 20
+  % 2D FFT
+  for ii = 1:size(img,4)
+    switch handles.vvi.fftMode
+      case 10
+        % No Shifts
+        img(:,:,:,ii) = ifft2(img(:,:,:,ii));
+      case 11
+        % Pre-Shift
+        img(:,:,:,ii) = ifft2(fftshift(img(:,:,:,ii)));
+      case 12
+        % Post-Shift
+        img(:,:,:,ii) = fftshift(ifft2(img(:,:,:,ii)));
+      case 13
+        % Both Shift
+        img(:,:,:,ii) = fftshift(ifft2(fftshift(img(:,:,:,ii))));
+    end
+  end
+  
+elseif handles.vvi.fftMode > 10
+  % 3D FFT
+  for ii = 1:size(img,4)
+    switch handles.vvi.fftMode
+      case 20
+        % No Shifts
+        img(:,:,:,ii) = ifftn(img(:,:,:,ii));
+      case 21
+        % Pre-Shift
+        img(:,:,:,ii) = ifftn(fftshift(img(:,:,:,ii)));
+      case 22
+        % Post-Shift
+        img(:,:,:,ii) = fftshift(ifftn(img(:,:,:,ii)));
+      case 23
+        % Both Shift
+        img(:,:,:,ii) = fftshift(ifftn(fftshift(img(:,:,:,ii))));
+    end
+  end
+end
+
 % Take mag/phase/real/imag as appropriate
 switch handles.vvi.complexMode
   case 0
@@ -792,7 +837,7 @@ function textMessage(handles, type, msg)
 
   if strcmp(type, 'err')
     disp(['ERROR: ' msg]);
-    axes(handles.mainAxes);
+    axes(handles.mainAxes); %#ok<MAXES>
     text(2,4, ['ERROR: ' msg], 'HorizontalAlignment','left', 'FontSize', 12, 'Color', 'red');
   else
     if size(msg, 2) == 1
@@ -800,7 +845,7 @@ function textMessage(handles, type, msg)
     else
       disp(msg);
     end
-    axes(handles.mainAxes);
+    axes(handles.mainAxes); %#ok<MAXES>
     if size(msg, 2) == 1
       text(2,4, ['INFO: '  msg], 'HorizontalAlignment','left', 'FontSize', 12, 'Color', 'white');
     else
@@ -985,6 +1030,301 @@ set(handles.pushLoad, 'BackgroundColor', [.800 .800 .800]);
 set(handles.pushFFT,  'BackgroundColor', [.800 .800 .800]);
 set(handles.pushStats,'BackgroundColor', [.757 .867 .776]);
 
+% --- Executes on button press in permuteXZ.
+function permuteXZ_Callback(hObject, eventdata, handles)
+% hObject    handle to permuteXZ (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Swap X/Z index (in order to view "coronal" or "sag")
+handles.vvi.displayImage = permute(handles.vvi.displayImage, [3 2 1 4]);
+size(handles.vvi.displayImage)
+handles.vvi.imageSize = size(handles.vvi.displayImage);
+
+% For 3D data, make sure that the 4th entry is populated with some value
+if numel(handles.vvi.imageSize) < 4
+  handles.vvi.imageSize(4) = 1;
+end
+
+% Reset View Index to Mid-Slice
+handles.vvi.currentSlice = round(handles.vvi.imageSize(3)/2);
+set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
+
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in pushPermuteYZ.
+function pushPermuteYZ_Callback(hObject, eventdata, handles)
+% hObject    handle to pushPermuteYZ (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Swap X/Z index (in order to view "coronal" or "sag")
+handles.vvi.displayImage = permute(handles.vvi.displayImage, [1 3 2 4]);
+handles.vvi.imageSize = size(handles.vvi.displayImage);
+
+% For 3D data, make sure that the 4th entry is populated with some value
+if numel(handles.vvi.imageSize) < 4
+  handles.vvi.imageSize(4) = 1;
+end
+
+% Reset View Index to Mid-Slice
+handles.vvi.currentSlice = round(handles.vvi.imageSize(3)/2);
+set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
+
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+
+% --- Executes on button press in pushRotate.
+function pushRotate_Callback(hObject, eventdata, handles)
+% hObject    handle to pushRotate (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Do Imtranspose
+handles.vvi.displayImage = imtranspose(handles.vvi.displayImage);
+handles.vvi.imageSize = size(handles.vvi.displayImage);
+
+% For 3D data, make sure that the 4th entry is populated with some value
+if numel(handles.vvi.imageSize) < 4
+  handles.vvi.imageSize(4) = 1;
+end
+
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in pushFlipLR.
+function pushFlipLR_Callback(hObject, eventdata, handles)
+% hObject    handle to pushFlipLR (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Do ImFlipLR
+handles.vvi.displayImage = imfliplr(handles.vvi.displayImage);
+
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in pushFlipUD.
+function pushFlipUD_Callback(hObject, eventdata, handles)
+% hObject    handle to pushFlipUD (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Do ImFlipUD
+handles.vvi.displayImage = imflipud(handles.vvi.displayImage);
+
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes when selected object is changed in panelFFT.
+function panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
+% hObject    handle to the selected object in panelFFT 
+% eventdata  structure with the following fields (see UIBUTTONGROUP)
+%	EventName: string 'SelectionChanged' (read only)
+%	OldValue: handle of the previously selected object or empty if none was selected
+%	NewValue: handle of the currently selected object
+% handles    structure with handles and user data (see GUIDATA)
+
+% Update the fftMode based on the radio buttons and check boxes
+if get(handles.radioImageSpace, 'Value') == 1
+  handles.vvi.fftMode = 0;
+elseif get(handles.radio2DFFT, 'Value') == 1
+  handles.vvi.fftMode = 10;
+else
+  handles.vvi.fftMode = 20;
+end
+
+% Pre-shift
+if get(handles.checkPreShift, 'Value') == 1
+  handles.vvi.fftMode = handles.vvi.fftMode + 1;
+end
+
+% Post-shift
+if get(handles.checkPostShift, 'Value') == 1
+  handles.vvi.fftMode = handles.vvi.fftMode + 2;
+end
+
+% Update the image
+handles = updateCplx(handles);
+
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in checkPreShift.
+function checkPreShift_Callback(hObject, eventdata, handles)
+% hObject    handle to checkPreShift (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hint: get(hObject,'Value') returns toggle state of checkPreShift
+panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
+
+
+% --- Executes on button press in checkPostShift.
+function checkPostShift_Callback(hObject, eventdata, handles)
+% hObject    handle to checkPostShift (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hint: get(hObject,'Value') returns toggle state of checkPostShift
+panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
+
+% --- Executes on button press in pushResample.
+function pushResample_Callback(hObject, eventdata, handles)
+% hObject    handle to pushResample (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Check if matrix is non-square
+size = handles.vvi.imageSize;
+
+if size(1) ~= size(2)
+  % Find max size
+  maxsize = max([size(1) size(2)]);
+  
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize;
+  imageDisp(handles);
+end
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in pushResample12
+function pushResample12_Callback(hObject, eventdata, handles)
+% hObject    handle to pushResample12 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+size = handles.vvi.imageSize;
+
+% Find max size
+maxsize = max([size(1) size(2)]);
+
+% Find Smaller Dim, to resize;
+if size(1) > size(2)
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize*0.5]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize*0.5;
+else
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize*0.5 maxsize]);
+  handles.vvi.imageSize(1) = maxsize*0.5;
+  handles.vvi.imageSize(2) = maxsize;
+end
+
+% Display New Image
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in pushResample13
+function pushResample13_Callback(hObject, eventdata, handles)
+% hObject    handle to pushResample13 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+size = handles.vvi.imageSize;
+
+% Find max size
+maxsize = max([size(1) size(2)]);
+
+% Find Smaller Dim, to resize;
+if size(1) > size(2)
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize*0.3333]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize*0.3333;
+else
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize*0.3333 maxsize]);
+  handles.vvi.imageSize(1) = maxsize*0.3333;
+  handles.vvi.imageSize(2) = maxsize;
+end
+
+% Display New Image
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in pushResample14.
+function pushResample14_Callback(hObject, eventdata, handles)
+% hObject    handle to pushResample14 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+size = handles.vvi.imageSize;
+
+% Find max size
+maxsize = max([size(1) size(2)]);
+
+% Find Smaller Dim, to resize;
+if size(1) > size(2)
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize*0.25]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize*0.25;
+else
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize*0.25 maxsize]);
+  handles.vvi.imageSize(1) = maxsize*0.25;
+  handles.vvi.imageSize(2) = maxsize;
+end
+
+% Display New Image
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
+
+% --- Executes on button press in pushZip2.
+function pushZip2_Callback(hObject, eventdata, handles)
+% hObject    handle to pushZip2 (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+size = handles.vvi.imageSize;
+
+% Resample image
+handles.vvi.displayImage = img_resize(handles.vvi.displayImage, 2);
+handles.vvi.imageSize(1) = size(1)*2;
+handles.vvi.imageSize(2) = size(2)*2;
+
+% Display New Image
+imageDisp(handles);
+
+% Update handles structure
+guidata(hObject, handles);
+
 
 % ==== External Programs Below ==============
 
@@ -1088,3 +1428,4 @@ else
   img1(:,:,1,:) = img;
   montage(img1(:,:,1,range(1):range(2)), 'DisplayRange', window);
 end
+
