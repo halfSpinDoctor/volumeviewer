@@ -15,8 +15,11 @@
 %  v1.0 - Basic saveas(gcf, '') implementation (Dec-2010)
 %  v2.0 - based on myaa (anti-aliased figure generator)
 %         added a flag for EPS
+%  v2.1 - Warning off to avoid EPS export errors.
 
 function [] = savefig(fname, epsflag)
+
+warning off; %#ok<WNOFF>
 
 if ~exist('epsflag', 'var')
   epsflag = 0;
@@ -28,14 +31,19 @@ self.figmode = 'figure';
 
 %% Find out about the current DPI...
 screen_DPI = get(0,'ScreenPixelsPerInch');
+disp(['Screen DPI: ' num2str(screen_DPI)]);
 
 %% Capture current figure in high resolution
 tempfile = 'myaa_temp_screendump.png';
 self.source_fig = gcf;
 current_paperpositionmode = get(self.source_fig,'PaperPositionMode');
-current_inverthardcopy = get(self.source_fig,'InvertHardcopy');
+current_inverthardcopy    = get(self.source_fig,'InvertHardcopy');
 set(self.source_fig,'PaperPositionMode','auto');
 % set(self.source_fig,'InvertHardcopy','off');   % Keeps gray background.
+
+% Set font to Nimbus Sans L, for Linux/UNIX compat. -- done in Startup.m
+% fontName = 'Nimbus Sans L';
+% set(get(gcf,'CurrentAxes'),'FontName',fontName,'FontSize',12);
 
 if epsflag == 0
   print(self.source_fig,['-r',num2str(screen_DPI*self.K(1))], '-dpng', tempfile);
@@ -57,4 +65,5 @@ raw_lowres = single(imresize(self.raw_hires,1/self.K(2),'bilinear'))/256;
 %% Write out resulting image
 imwrite(raw_lowres, fname);
 
+warning on; %#ok<WNON>
 return;
