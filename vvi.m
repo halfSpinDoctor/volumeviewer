@@ -68,6 +68,7 @@ function varargout = vvi(varargin)
 %          Fixed bug setting initial min & max when the image is complex (Sep-2011)
 %     v2.1 Changed FFT to 'Processing,' added options for resampling images
 %          especially when you permute axes for non-isotropic scans.
+%     v2.1a - Small edit to test push for BitBucket
 %
 % Last Modified by GUIDE v2.5 11-Oct-2011 10:56:04
 
