@@ -27,8 +27,11 @@ function varargout = vvi(varargin)
 %      max          - the maximum intensity to display
 %      currentSlice - the currently selected slice
 %      currentPhase - the currently selected 'phase' (z for a 4D image)
-%      imageSize    - the dimensions of the currently loaded image
+%      imageSize    - the matrix dimensions of the currently loaded image
+%      imageDims    - the spatial dimensions (mm) of the currently loaded image
 %      
+%      imageRot     - custom rotation transform (Rx Ry Rz in deg) to apply
+%
 %      currentVars  - the current workspace variables
 %      montage      - 0 = use imagesc,  1 = use imsc
 %
@@ -74,7 +77,7 @@ function varargout = vvi(varargin)
 %             3-axis views, loading Variables/NIfTI Volumes
 %
 %
-% Last Modified by GUIDE v2.5 25-Apr-2013 15:51:01
+% Last Modified by GUIDE v2.5 20-May-2013 14:11:34
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -94,6 +97,10 @@ else
     gui_mainfcn(gui_State, varargin{:});
 end
 % End initialization code - DO NOT EDIT
+
+% == Begin Constants ==
+DEG_TO_RAD = pi/180;
+% == End   Constants ==
 
 
 % --- Executes just before vvi is made visible.
@@ -747,7 +754,7 @@ switch handles.vvi.complexMode
 end
 
 % Remove NaN and Infs from the image
-img(isinf(img)) = 0;
+img(isinf(img)) = 0; 
 img(isnan(img)) = 0;
 
 % Store img in displayImage
@@ -1202,19 +1209,72 @@ function pushResample_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Check if matrix is non-square
-size = handles.vvi.imageSize;
+% Formulate Rotation Matrix Based on Rx/Ry/Rz
+DEG_TO_RAD = pi/180;
 
-if size(1) ~= size(2)
-  % Find max size
-  maxsize = max([size(1) size(2)]);
-  
-  % Create a dummy NIfTI file that matches 
-  
-end
+Rx_theta = handles.vvi.imageRot(1) * DEG_TO_RAD;
+Ry_theta = handles.vvi.imageRot(2) * DEG_TO_RAD;
+Rz_theta = handles.vvi.imageRot(3) * DEG_TO_RAD;
+
+Rx = [1             0             0;             0              cos(Rx_theta)  sin(Rx_theta); 0             -sin(Rx_theta) cos(Rx_theta)];
+Ry = [cos(Ry_theta) 0            -sin(Ry_theta); 0              1              0;             sin(Ry_theta)  0             cos(Ry_theta)];
+Rz = [cos(Rz_theta) sin(Rz_theta) 0;            -sin(Rz_theta)  cos(Rz_theta)  0;             0              0             1            ];
+
+% Formulate General Rotation
+R  = Rx * Ry * Rz;
+
+% Convert R into an affine transform
+R(:,4) = [0 0 handles.vvi.imageRot(1)/2];
+R(4,4) = 1;
+R
+
+% R(:,4) = handles.vvi.imageRot; % Use the rotations so that it stays centered in the volume
+
+% Write out XFORM
+write_xform(R, 'R.txt');
+
+% Write out current image as a NIfTI
+
+% Real
+img_dcm_to_nifti(real(handles.vvi.currentImage), [], 'TMPxx_REAL', 1, handles.vvi.imageDims);
+% Imag
+img_dcm_to_nifti(imag(handles.vvi.currentImage), [], 'TMPxx_IMAG', 1, handles.vvi.imageDims);
+
+% Apply XFORM
+% Apply rotation matrix
+opts = [' -datatype float  -searchcost mutualinfo -cost mutualinfo -bins 256 -dof 6 -searchrx -6 6' ...
+        ' -searchry -6 6 -searchrz -6 6  -coarsesearch 2 -finesearch 1 -interp sinc'];
+
+% % Faster Options -- Poor Resamplingf Scheme
+% opts = '-datatype float';
+      
+ref = 'TMPxx_REAL.nii';
+in  = 'TMPxx_REAL.nii';
+out = 'TMPxx_REAL_CR.nii';
+
+eval(['!flirt -in ' in ' -ref ' ref ' -out ' out ' -init R.txt -applyxfm ' opts]);
+eval(['!fslchfiletype NIFTI ' out]);
+
+ref = 'TMPxx_IMAG.nii';
+in  = 'TMPxx_IMAG.nii';
+out = 'TMPxx_IMAG_CR.nii';
+
+eval(['!flirt -in ' in ' -ref ' ref ' -out ' out ' -init R.txt -applyxfm ' opts]);
+eval(['!fslchfiletype NIFTI ' out]);
+
+% Load Back In Real/Imag
+imgR = load_nifti('TMPxx_REAL_CR.nii');
+imgI = load_nifti('TMPxx_IMAG_CR.nii');
+
+% Combine into single complex-valued variable
+handles.vvi.currentImage = complex(imgR, imgI);
+handles.vvi.displayImage = abs(handles.vvi.currentImage);
 
 % Update handles structure
 guidata(hObject, handles);
+
+% Cleanup
+!rm -f TMPxx*.nii
 
 % =-=-=-=-=-=-= Dimensions/Rotation/Resample Callbacks Here! =-=-=-=-=-=
 
@@ -1239,7 +1299,7 @@ handles.vvi.imageDims(1) = xDim;
 set(hObject, 'String', num2str(handles.vvi.imageDims(1), '%.02f'));
 
 % DEBUG: Write out image dims to command prompt
-disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
+% disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1280,7 +1340,7 @@ handles.vvi.imageDims(2) = yDim;
 set(hObject, 'String', num2str(handles.vvi.imageDims(2), '%.02f'));
 
 % DEBUG: Write out image dims to command prompt
-disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
+% disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1321,7 +1381,7 @@ handles.vvi.imageDims(3) = zDim;
 set(hObject, 'String', num2str(handles.vvi.imageDims(3), '%.02f'));
 
 % DEBUG: Write out image dims to command prompt
-disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
+% disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1359,7 +1419,7 @@ handles.vvi.imageRot(1) = Rx;
 set(hObject, 'String', num2str(handles.vvi.imageRot(1), '%.02f'));
 
 % DEBUG: Write out image dims to command prompt
-disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
+% disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1386,7 +1446,7 @@ handles.vvi.imageRot(2) = Ry;
 set(hObject, 'String', num2str(handles.vvi.imageRot(2), '%.02f'));
 
 % DEBUG: Write out image dims to command prompt
-disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
+% disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1413,7 +1473,7 @@ handles.vvi.imageRot(3) = Rz;
 set(hObject, 'String', num2str(handles.vvi.imageRot(3), '%.02f'));
 
 % DEBUG: Write out image dims to command prompt
-disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
+% disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1561,3 +1621,34 @@ function editRz_CreateFcn(hObject, eventdata, handles)
 if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
     set(hObject,'BackgroundColor','white');
 end
+
+
+% --- Executes on button press in pushWriteOut.
+function pushWriteOut_Callback(hObject, eventdata, handles)
+% hObject    handle to pushWriteOut (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Write out current slice directly to TIFF (bypass creation of figure, smoothing, etc)
+% Grab a copy of current slice
+
+if handles.vvi.montage == 0
+  if handles.vvi.complexMode == 4
+    tmp = phplot(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
+  else
+    tmp = handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase);
+  end
+  
+elseif handles.vvi.montage == 1
+  msgbox('Cannot write out direct TIFF in Montage Mode');
+end
+
+% Scale tmp from 0->1
+tmp = tmp - handles.vvi.min;
+tmp(tmp < 0) = 0; % Remove negative values
+tmp = tmp ./ (handles.vvi.max - handles.vvi.min);
+tmp(tmp > 1) = 1; % Clip values above max
+
+filename = inputdlg('Save TIFF As:');
+filename = filename{1};
+imwrite(tmp, filename);
