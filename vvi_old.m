@@ -27,11 +27,8 @@ function varargout = vvi(varargin)
 %      max          - the maximum intensity to display
 %      currentSlice - the currently selected slice
 %      currentPhase - the currently selected 'phase' (z for a 4D image)
-%      imageSize    - the matrix dimensions of the currently loaded image
-%      imageDims    - the spatial dimensions (mm) of the currently loaded image
+%      imageSize    - the dimensions of the currently loaded image
 %      
-%      imageRot     - custom rotation transform (Rx Ry Rz in deg) to apply
-%
 %      currentVars  - the current workspace variables
 %      montage      - 0 = use imagesc,  1 = use imsc
 %
@@ -72,12 +69,8 @@ function varargout = vvi(varargin)
 %     v2.1 Changed FFT to 'Processing,' added options for resampling images
 %          especially when you permute axes for non-isotropic scans.
 %     v2.1a - Small edit to test push for BitBucket
-%     v3.0a - Alpha of v3.0 Working towards using spm_slice_vol or similar
-%             MEX functionality to more quickly reorient/oblique slice volumes,
-%             3-axis views, loading Variables/NIfTI Volumes
 %
-%
-% Last Modified by GUIDE v2.5 20-May-2013 14:11:34
+% Last Modified by GUIDE v2.5 04-Nov-2014 13:15:47
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -97,10 +90,6 @@ else
     gui_mainfcn(gui_State, varargin{:});
 end
 % End initialization code - DO NOT EDIT
-
-% == Begin Constants ==
-DEG_TO_RAD = pi/180;
-% == End   Constants ==
 
 
 % --- Executes just before vvi is made visible.
@@ -123,8 +112,6 @@ handles.vvi.max          = 1;
 handles.vvi.currentSlice = 1;
 handles.vvi.currentPhase = 1;
 handles.vvi.imageSize    = [20 20 1 1];
-handles.vvi.imageDims    = [1  1  1];   % v3: Spatial Dims of Image (mm)
-handles.vvi.imageRot     = [0  0  0];   % v3: [Rx Ry Rz] (degrees) Rotations  
 handles.vvi.montage      = 0;
 handles.vvi.complexMode  = 0;  % 0  = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
 handles.vvi.fftMode      = 00; % 00 = Image Space
@@ -754,7 +741,7 @@ switch handles.vvi.complexMode
 end
 
 % Remove NaN and Infs from the image
-img(isinf(img)) = 0; 
+img(isinf(img)) = 0;
 img(isnan(img)) = 0;
 
 % Store img in displayImage
@@ -1203,281 +1190,141 @@ function checkPostShift_Callback(hObject, eventdata, handles)
 % Hint: get(hObject,'Value') returns toggle state of checkPostShift
 panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
 
-% --- Executes on button press in pushResample (to apply rotation & scale transforms).
+% --- Executes on button press in pushResample.
 function pushResample_Callback(hObject, eventdata, handles)
-% hObject    handle to pushResample11 (see GCBO)
+% hObject    handle to pushResample (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Formulate Rotation Matrix Based on Rx/Ry/Rz
-DEG_TO_RAD = pi/180;
+% Check if matrix is non-square
+size = handles.vvi.imageSize;
 
-Rx_theta = handles.vvi.imageRot(1) * DEG_TO_RAD;
-Ry_theta = handles.vvi.imageRot(2) * DEG_TO_RAD;
-Rz_theta = handles.vvi.imageRot(3) * DEG_TO_RAD;
-
-Rx = [1             0             0;             0              cos(Rx_theta)  sin(Rx_theta); 0             -sin(Rx_theta) cos(Rx_theta)];
-Ry = [cos(Ry_theta) 0            -sin(Ry_theta); 0              1              0;             sin(Ry_theta)  0             cos(Ry_theta)];
-Rz = [cos(Rz_theta) sin(Rz_theta) 0;            -sin(Rz_theta)  cos(Rz_theta)  0;             0              0             1            ];
-
-% Formulate General Rotation
-R  = Rx * Ry * Rz;
-
-% Convert R into an affine transform
-R(:,4) = [0 0 handles.vvi.imageRot(1)/2];
-R(4,4) = 1;
-R
-
-% R(:,4) = handles.vvi.imageRot; % Use the rotations so that it stays centered in the volume
-
-% Write out XFORM
-write_xform(R, 'R.txt');
-
-% Write out current image as a NIfTI
-
-% Real
-img_dcm_to_nifti(real(handles.vvi.currentImage), [], 'TMPxx_REAL', 1, handles.vvi.imageDims);
-% Imag
-img_dcm_to_nifti(imag(handles.vvi.currentImage), [], 'TMPxx_IMAG', 1, handles.vvi.imageDims);
-
-% Apply XFORM
-% Apply rotation matrix
-opts = [' -datatype float  -searchcost mutualinfo -cost mutualinfo -bins 256 -dof 6 -searchrx -6 6' ...
-        ' -searchry -6 6 -searchrz -6 6  -coarsesearch 2 -finesearch 1 -interp sinc'];
-
-% % Faster Options -- Poor Resamplingf Scheme
-% opts = '-datatype float';
-      
-ref = 'TMPxx_REAL.nii';
-in  = 'TMPxx_REAL.nii';
-out = 'TMPxx_REAL_CR.nii';
-
-eval(['!flirt -in ' in ' -ref ' ref ' -out ' out ' -init R.txt -applyxfm ' opts]);
-eval(['!fslchfiletype NIFTI ' out]);
-
-ref = 'TMPxx_IMAG.nii';
-in  = 'TMPxx_IMAG.nii';
-out = 'TMPxx_IMAG_CR.nii';
-
-eval(['!flirt -in ' in ' -ref ' ref ' -out ' out ' -init R.txt -applyxfm ' opts]);
-eval(['!fslchfiletype NIFTI ' out]);
-
-% Load Back In Real/Imag
-imgR = load_nifti('TMPxx_REAL_CR.nii');
-imgI = load_nifti('TMPxx_IMAG_CR.nii');
-
-% Combine into single complex-valued variable
-handles.vvi.currentImage = complex(imgR, imgI);
-handles.vvi.displayImage = abs(handles.vvi.currentImage);
-
-% Update handles structure
-guidata(hObject, handles);
-
-% Cleanup
-!rm -f TMPxx*.nii
-
-% =-=-=-=-=-=-= Dimensions/Rotation/Resample Callbacks Here! =-=-=-=-=-=
-
-function editXDim_Callback(hObject, eventdata, handles)
-% hObject    handle to editMin (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Convert String Input to Number
-xDim = str2double(get(hObject, 'String'));
-
-% Verify valid, non-zero non-negative input
-if isnan(xDim) || isinf(xDim) || (xDim <= 0)
-  xDim = 1; % Default back to 1
+if size(1) ~= size(2)
+  % Find max size
+  maxsize = max([size(1) size(2)]);
+  
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize;
+  imageDisp(handles);
 end
-
-% Write value to handles struct
-handles.vvi.imageDims(1) = xDim;
-
-% Write back to edit input
-
-set(hObject, 'String', num2str(handles.vvi.imageDims(1), '%.02f'));
-
-% DEBUG: Write out image dims to command prompt
-% disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
 
 % Update handles structure
 guidata(hObject, handles);
 
 
-% --- Executes during object creation, after setting all properties.
-function editXDim_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editXDim (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-
-function editYDim_Callback(hObject, eventdata, handles)
-% hObject    handle to editMin (see GCBO)
+% --- Executes on button press in pushResample12
+function pushResample12_Callback(hObject, eventdata, handles)
+% hObject    handle to pushResample12 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Convert String Input to Number
-yDim = str2double(get(hObject, 'String'));
+size = handles.vvi.imageSize;
 
-% Verify valid, non-zero non-negative input
-if isnan(yDim) || isinf(yDim) || (yDim <= 0)
-  yDim = 1; % Default back to 1
+% Find max size
+maxsize = max([size(1) size(2)]);
+
+% Find Smaller Dim, to resize;
+if size(1) > size(2)
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize*0.5]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize*0.5;
+else
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize*0.5 maxsize]);
+  handles.vvi.imageSize(1) = maxsize*0.5;
+  handles.vvi.imageSize(2) = maxsize;
 end
 
-% Write value to handles struct
-handles.vvi.imageDims(2) = yDim;
-
-% Write back to edit input
-
-set(hObject, 'String', num2str(handles.vvi.imageDims(2), '%.02f'));
-
-% DEBUG: Write out image dims to command prompt
-% disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
+% Display New Image
+imageDisp(handles);
 
 % Update handles structure
 guidata(hObject, handles);
 
 
-% --- Executes during object creation, after setting all properties.
-function editYDim_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editYDim (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-
-function editZDim_Callback(hObject, eventdata, handles)
-% hObject    handle to editMin (see GCBO)
+% --- Executes on button press in pushResample13
+function pushResample13_Callback(hObject, eventdata, handles)
+% hObject    handle to pushResample13 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Convert String Input to Number
-zDim = str2double(get(hObject, 'String'));
+size = handles.vvi.imageSize;
 
-% Verify valid, non-zero non-negative input
-if isnan(zDim) || isinf(zDim) || (zDim <= 0)
-  zDim = 1; % Default back to 1
+% Find max size
+maxsize = max([size(1) size(2)]);
+
+% Find Smaller Dim, to resize;
+if size(1) > size(2)
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize*0.3333]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize*0.3333;
+else
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize*0.3333 maxsize]);
+  handles.vvi.imageSize(1) = maxsize*0.3333;
+  handles.vvi.imageSize(2) = maxsize;
 end
 
-% Write value to handles struct
-handles.vvi.imageDims(3) = zDim;
-
-% Write back to edit input
-
-set(hObject, 'String', num2str(handles.vvi.imageDims(3), '%.02f'));
-
-% DEBUG: Write out image dims to command prompt
-% disp(['DEBUG: ' num2str(handles.vvi.imageDims)]);
+% Display New Image
+imageDisp(handles);
 
 % Update handles structure
 guidata(hObject, handles);
 
 
-% --- Executes during object creation, after setting all properties.
-function editZDim_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editZDim (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-function editRx_Callback(hObject, eventdata, handles)
-% hObject    handle to editMin (see GCBO)
+% --- Executes on button press in pushResample14.
+function pushResample14_Callback(hObject, eventdata, handles)
+% hObject    handle to pushResample14 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Convert String Input to Number
-Rx = str2double(get(hObject, 'String'));
+size = handles.vvi.imageSize;
 
-% Verify valid input
-if isnan(Rx) || isinf(Rx)
-  Rx = 0; % Default back to 0 degrees
+% Find max size
+maxsize = max([size(1) size(2)]);
+
+% Find Smaller Dim, to resize;
+if size(1) > size(2)
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize maxsize*0.25]);
+  handles.vvi.imageSize(1) = maxsize;
+  handles.vvi.imageSize(2) = maxsize*0.25;
+else
+  % Resample image
+  handles.vvi.displayImage = img_resize(handles.vvi.displayImage, [maxsize*0.25 maxsize]);
+  handles.vvi.imageSize(1) = maxsize*0.25;
+  handles.vvi.imageSize(2) = maxsize;
 end
 
-% Write value to handles struct
-handles.vvi.imageRot(1) = Rx;
-
-% Write back to edit input
-set(hObject, 'String', num2str(handles.vvi.imageRot(1), '%.02f'));
-
-% DEBUG: Write out image dims to command prompt
-% disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
+% Display New Image
+imageDisp(handles);
 
 % Update handles structure
 guidata(hObject, handles);
 
 
-
-function editRy_Callback(hObject, eventdata, handles)
-% hObject    handle to editMin (see GCBO)
+% --- Executes on button press in pushZip2.
+function pushZip2_Callback(hObject, eventdata, handles)
+% hObject    handle to pushZip2 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Convert String Input to Number
-Ry = str2double(get(hObject, 'String'));
+size = handles.vvi.imageSize;
 
-% Verify valid input
-if isnan(Ry) || isinf(Ry)
-  Ry = 0; % Default back to 0 degrees
-end
+% Resample image
+handles.vvi.displayImage = img_resize(handles.vvi.displayImage, 2);
+handles.vvi.imageSize(1) = size(1)*2;
+handles.vvi.imageSize(2) = size(2)*2;
 
-% Write value to handles struct
-handles.vvi.imageRot(2) = Ry;
-
-% Write back to edit input
-set(hObject, 'String', num2str(handles.vvi.imageRot(2), '%.02f'));
-
-% DEBUG: Write out image dims to command prompt
-% disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
+% Display New Image
+imageDisp(handles);
 
 % Update handles structure
 guidata(hObject, handles);
-
-
-
-function editRz_Callback(hObject, eventdata, handles)
-% hObject    handle to editMin (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Convert String Input to Number
-Rz = str2double(get(hObject, 'String'));
-
-% Verify valid input
-if isnan(Rz) || isinf(Rz)
-  Rz = 0; % Default back to 0 degrees
-end
-
-% Write value to handles struct
-handles.vvi.imageRot(3) = Rz;
-
-% Write back to edit input
-set(hObject, 'String', num2str(handles.vvi.imageRot(3), '%.02f'));
-
-% DEBUG: Write out image dims to command prompt
-% disp(['DEBUG: ' num2str(handles.vvi.imageRot)]);
-
-% Update handles structure
-guidata(hObject, handles);
-
 
 
 % ==== External Programs Below ==============
@@ -1585,70 +1432,7 @@ end
 
 
 % --- Executes during object creation, after setting all properties.
-function editRx_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editRx (see GCBO)
+function figure1_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to figure1 (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function editRy_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editRy (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function editRz_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editRz (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes on button press in pushWriteOut.
-function pushWriteOut_Callback(hObject, eventdata, handles)
-% hObject    handle to pushWriteOut (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Write out current slice directly to TIFF (bypass creation of figure, smoothing, etc)
-% Grab a copy of current slice
-
-if handles.vvi.montage == 0
-  if handles.vvi.complexMode == 4
-    tmp = phplot(handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase), handles.vvi.max);
-  else
-    tmp = handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase);
-  end
-  
-elseif handles.vvi.montage == 1
-  msgbox('Cannot write out direct TIFF in Montage Mode');
-end
-
-% Scale tmp from 0->1
-tmp = tmp - handles.vvi.min;
-tmp(tmp < 0) = 0; % Remove negative values
-tmp = tmp ./ (handles.vvi.max - handles.vvi.min);
-tmp(tmp > 1) = 1; % Clip values above max
-
-filename = inputdlg('Save TIFF As:');
-filename = filename{1};
-imwrite(tmp, filename);
