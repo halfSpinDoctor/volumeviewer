@@ -80,7 +80,7 @@ function varargout = vvi(varargin)
 %             versions). Fixed bug when 
 %
 %
-% Last Modified by GUIDE v2.5 04-Nov-2014 13:36:13
+% Last Modified by GUIDE v2.5 10-Jul-2015 02:33:32
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -271,12 +271,16 @@ contents = cellstr(get(hObject,'String'));
 cm       = strtrim(contents{get(hObject,'Value')});
 
 % Check for custom maps jet2 or hsv2
-if strcmp(cm, 'Jet2')
+if strcmp(cm, 'Jet_Mask')
   handles.vvi.colormap = colormap('Jet');
-  handles.vvi.colormap(1,:) = [0 0 0]; % Set 0 value to black
+  handles.vvi.colormap(1,:) = [0 0 0];  % Set 0 value to black
   
-elseif strcmp(cm, 'HSV2')
+elseif strcmp(cm, 'HSV_Mask')
   handles.vvi.colormap = colormap('HSV');
+  handles.vvi.colormap(1, :) = [0 0 0]; % Set 0 value to black
+  
+elseif strcmp(cm, 'Parula_Mask')
+  handles.vvi.colormap = colormap('Parula');
   handles.vvi.colormap(1, :) = [0 0 0]; % Set 0 value to black
 
 else
@@ -1018,9 +1022,9 @@ function pushLoad_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 % Make The Active Button Green, All Others Gray
-set(handles.pushLoad, 'BackgroundColor', [.757 .867 .776]);
-set(handles.pushFFT,  'BackgroundColor', [.800 .800 .800]);
-set(handles.pushStats,'BackgroundColor', [.800 .800 .800]);
+set(handles.pushLoad, 'Value', 1.0);
+set(handles.pushFFT,  'Value', 0.0);
+set(handles.pushStats,'Value', 0.0);
 
 % Make this panel visible, hide all others
 set(handles.panelVars, 'Visible', 'on');
@@ -1033,9 +1037,9 @@ function pushFFT_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 % Make The Active Button Green, All Others Gray
-set(handles.pushLoad, 'BackgroundColor', [.800 .800 .800]);
-set(handles.pushFFT,  'BackgroundColor', [.757 .867 .776]);
-set(handles.pushStats,'BackgroundColor', [.800 .800 .800]);
+set(handles.pushLoad, 'Value', 0.0);
+set(handles.pushFFT,  'Value', 1.0);
+set(handles.pushStats,'Value', 0.0);
 
 % Make this panel visible, hide all others
 set(handles.panelVars, 'Visible', 'off');
@@ -1047,10 +1051,10 @@ function pushStats_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% Make The Active Button Green, All Others Gray
-set(handles.pushLoad, 'BackgroundColor', [.800 .800 .800]);
-set(handles.pushFFT,  'BackgroundColor', [.800 .800 .800]);
-set(handles.pushStats,'BackgroundColor', [.757 .867 .776]);
+% Make The Active Button 'Tabbed', All Others 'Untabbed'
+set(handles.pushLoad, 'Value', 0.0);
+set(handles.pushFFT,  'Value', 0.0);
+set(handles.pushStats,'Value', 1.0);
 
 % --- Executes on button press in permuteXZ.
 function permuteXZ_Callback(hObject, eventdata, handles)
@@ -1284,7 +1288,7 @@ guidata(hObject, handles);
 % Cleanup
 !rm -f TMPxx*.nii
 
-% =-=-=-=-=-=-= Dimensions/Rotation/Resample Callbacks Here! =-=-=-=-=-=
+% =-=-=-=-=-=-= Dimensions/Rotation/Resample Callbacks Here! =-=-=-=-=-=-=
 
 function editXDim_Callback(hObject, eventdata, handles)
 % hObject    handle to editMin (see GCBO)
@@ -1660,3 +1664,6 @@ tmp(tmp > 1) = 1; % Clip values above max
 filename = inputdlg('Save TIFF As:');
 filename = filename{1};
 imwrite(tmp, filename);
+
+
+% =-=-=-=-=-=-= Clickable UI Here =-=-=-=-=-=-=
