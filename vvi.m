@@ -54,6 +54,7 @@ function varargout = vvi(varargin)
 %      loadVars    - refresh list of base workspace variables
 %      loadImage   - load in an image from the base workspace into vvi
 %      textMessage - display a custom  message in the terminal & on image
+%      ImageClickCallback - Callback to get image click coordinates
 %
 % Builtin Dependancies
 %      phplot      - converts a complex dataset into a color-modulated image to visualize
@@ -93,7 +94,7 @@ function varargout = vvi(varargin)
 %             Update 'magic' to 20 (Jul-2015)
 %
 %
-% Last Modified by GUIDE v2.5 10-Jul-2015 12:22:19
+% Last Modified by GUIDE v2.5 11-Jul-2015 03:00:30
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -1236,8 +1237,20 @@ axis image;
 axis off;
 colorbar;
 
+% Set image handle to call ImageClickCallback
+set(imageHandle,'ButtonDownFcn',@ImageClickCallback);
+
 % Save handle to image for GUI click interface
 handles.vvi.imageHandle = imageHandle;
+
+
+% --- Callback to return image click coordinates ---
+function ImageClickCallback (objectHandle , eventData)
+axesHandle  = get(objectHandle,'Parent');
+coordinates = get(axesHandle,'CurrentPoint');
+coordinates = round(coordinates(1,1:2));
+disp(coordinates);
+
 
 
 % --- Update the complex representation of an image ---
@@ -1563,6 +1576,7 @@ set(handles.pushStats,'Value', 0.0);
 % Make this panel visible, hide all others
 set(handles.panelVars, 'Visible', 'on');
 set(handles.panelFFT,  'Visible', 'off');
+set(handles.panelStat, 'Visible', 'off');
 
 % --- Executes on button press in pushFFT.
 function pushFFT_Callback(hObject, eventdata, handles)
@@ -1578,6 +1592,7 @@ set(handles.pushStats,'Value', 0.0);
 % Make this panel visible, hide all others
 set(handles.panelVars, 'Visible', 'off');
 set(handles.panelFFT,  'Visible', 'on');
+set(handles.panelStat, 'Visible', 'off');
 
 % --- Executes on button press in pushStats.
 function pushStats_Callback(hObject, eventdata, handles)
@@ -1589,6 +1604,11 @@ function pushStats_Callback(hObject, eventdata, handles)
 set(handles.pushLoad, 'Value', 0.0);
 set(handles.pushFFT,  'Value', 0.0);
 set(handles.pushStats,'Value', 1.0);
+
+% Make this panel visible, hide all others
+set(handles.panelVars, 'Visible', 'off');
+set(handles.panelFFT,  'Visible', 'off');
+set(handles.panelStat, 'Visible', 'on');
 
 % --- Executes on button press in permuteXZ.
 function permuteXZ_Callback(hObject, eventdata, handles)
@@ -2047,15 +2067,3 @@ tmp(tmp > 1) = 1; % Clip values above max
 filename = inputdlg('Save TIFF As:');
 filename = filename{1};
 imwrite(tmp, filename);
-
-
-% =-=-=-=-=-=-= Clickable UI Here =-=-=-=-=-=-=
-
-
-% --- Executes on button press in checkLog.
-function checkLog_Callback(hObject, eventdata, handles)
-% hObject    handle to checkLog (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hint: get(hObject,'Value') returns toggle state of checkLog
