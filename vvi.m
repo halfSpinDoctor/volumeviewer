@@ -34,22 +34,26 @@ function varargout = vvi(varargin)
 %      currentVars  - the current workspace variables
 %      montage      - 0 = use imagesc,  1 = use imsc
 %
+%      isComplex    - 0 = real-valued array  1 = complex-valued array
 %      complexMode  - 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
 %      fftMode      - 1st digit 0 = Img Space 1 = 2D, 2 = 3D
 %                     2nd digit 0 = no shift  1 = Pre 2 = Post 3 = Both
+%                     3rd digit 0 = linear    2 = log scale
 %
 % Custom Variables for QMRI Mode (handles.vvi.qmri)
 %      qmri_mode         - 0 = DESPOT1 1 = DESPOT2-FM 3 = mcDESPOT
 %      mcdespot_settings - path to _mcdespot_settings file
-%      data_spgr         - SPGR data matrix (4D)
-%      data_ssfp_0       - SSFP data matrix (4D)
-%      data_ssfp_180     - SSFP data matrix (4D)
+%      data_spgr         - SPGR data matrix 4D
+%      data_ssfp_0       - SSFP data matrix 4D
+%      data_ssfp_180     - SSFP data matrix 4D
+%      mcd_fv            - fitted values (FV), 3D
 %      qmri_voxidx       - index of selected voxel on-screen
 %
 %
 % Custom Functions
 %      imageDisp   - display an image with custom scale [min max] and custom colormap
 %      updateCplx  - update the complex representation of the image (ABS/MAG/REAL/IMAG/CPHASE)
+%                    also applies FFT/FFTshift options
 %      imageLogo   - display the Matlab logo
 %      loadVars    - refresh list of base workspace variables
 %      loadImage   - load in an image from the base workspace into vvi
@@ -92,6 +96,11 @@ function varargout = vvi(varargin)
 %             resample function, image rotation data structs. Kept voxel size for later
 %             use. Significant cleanup of GUI elements, fonts, alignment, etc.
 %             Update 'magic' to 20 (Jul-2015)
+%
+%     v3.3  - Fixed incorrect behaviour of pre-shift for 2DFFT. Introduce an
+%             isComplex variable so that negative values are not lost in
+%             non-complex valued images due to abs() operation being performed.
+%             Implement code for log scale button in FFT panel.
 %
 %
 % Last Modified by GUIDE v2.5 11-Jul-2015 03:00:30
@@ -142,8 +151,9 @@ handles.vvi.currentPhase = 1;
 handles.vvi.imageSize    = [20 20 1 1];
 handles.vvi.imageDims    = [1  1  1];   % v3: Spatial Dims of Image (mm)
 handles.vvi.montage      = 0;
-handles.vvi.complexMode  = 0;  % 0  = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
-handles.vvi.fftMode      = 00; % 00 = Image Space
+handles.vvi.isComplex    = 0;  % 0 = real-valued array, 1 = complex-valued array
+handles.vvi.complexMode  = 0;  % 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
+handles.vvi.fftMode      = 000; % 000 = Image Space, no shift, linear scale
 
 % Populate image with Matlab logo
 imageLogo(handles);
@@ -283,7 +293,7 @@ function popupColormap_Callback(hObject, eventdata, handles)
 contents = cellstr(get(hObject,'String'));
 cm       = strtrim(contents{get(hObject,'Value')});
 
-% Check for custom maps: jet2, hsv2, viridis
+% Check for custom maps: jet2, hsv2, parula, viridis
 if strcmp(cm, 'Jet_Mask')
   handles.vvi.colormap = colormap('Jet');
   handles.vvi.colormap(1,:) = [0 0 0];  % Set 0 value to black
@@ -837,7 +847,7 @@ handles.vvi.min = str2double(get(hObject, 'String'));
 
 % Check to make sure min !> max
 if handles.vvi.min > handles.vvi.max
-  handles.vvi.min = handles.vvi.max*.5;
+  handles.vvi.min = handles.vvi.max * 0.10;
   set(handles.editMin, 'String', num2str(handles.vvi.min));
   textMessage(handles, 'err', 'You set the min higher than the max')
 end
@@ -857,7 +867,7 @@ handles.vvi.max = str2double(get(hObject, 'String'));
 
 % Check to make sure max !< min
 if handles.vvi.min > handles.vvi.max
-  handles.vvi.max = handles.vvi.min*1.05;
+  handles.vvi.max = handles.vvi.min * 1.10;
   set(handles.editMax, 'String', num2str(handles.vvi.max));
   textMessage(handles, 'err', 'You set the max higher than the min');
 end
@@ -884,22 +894,22 @@ else
 end
 
 % Grab the min & max
-handles.vvi.min = min(img(:));
-handles.vvi.max = max(img(:));
-
-if ~isreal(handles.vvi.min) || ~isreal(handles.vvi.max)
-  handles.vvi.min = abs(handles.vvi.min);
-  handles.vvi.max = abs(handles.vvi.max);
+if handles.vvi.isComplex == 0
+  handles.vvi.min = min(img(:));
+  handles.vvi.max = max(img(:));
+else
+  handles.vvi.min = min(abs(img(:)));
+  handles.vvi.max = max(abs(img(:)));
 end
 
-if handles.vvi.max == 0
-  % Just set to 1 if image is blank
-  handles.vvi.max = 1;
+if handles.vvi.max < handles.vvi.min
+  % If max is less than min, set it to min + 10%
+  handles.vvi.max = handles.vvi.min * 1.10;
 end
 
 if handles.vvi.min > handles.vvi.max
   % Set minimum to 10% of max.
-  handles.vvi.min = handles.vvi.max * .10;
+  handles.vvi.min = handles.vvi.max * 0.10;
 end
 
 % Set the value of the txt boxes
@@ -1167,7 +1177,7 @@ end
 % Convert from cell array to string
 handles.vvi.currentVars = [];
 for ii = 1:size(z, 2)
-  handles.vvi.currentVars = strvcat(handles.vvi.currentVars, z{ii}); %#ok<VCAT,REMFF1>
+  handles.vvi.currentVars = strvcat(handles.vvi.currentVars, z{ii});
 end
 
 % Update the string in listVars
@@ -1179,7 +1189,7 @@ function imageLogo(handles)
 % Populate main axis w matlab logo
 L = 40*membrane(1,25);
 
-axes(handles.mainAxes); %#ok<MAXES>
+axes(handles.mainAxes);
 set(handles.mainAxes, 'CameraPosition', [-193.4013 -265.1546  220.4819],...
     'Color', [1 1 1], ...
     'CameraTarget',[26 26 10], ...
@@ -1228,7 +1238,7 @@ if handles.vvi.montage == 0
   
 elseif handles.vvi.montage == 1
   % Show all slices of 1 phase
-  disp(size(handles.vvi.displayImage));
+  % disp(size(handles.vvi.displayImage));
   imageHandle = imgsc(handles.vvi.displayImage(:,:,:,handles.vvi.currentPhase), [handles.vvi.min handles.vvi.max]);
 end
 
@@ -1246,10 +1256,20 @@ handles.vvi.imageHandle = imageHandle;
 
 % --- Callback to return image click coordinates ---
 function ImageClickCallback (objectHandle , eventData)
-axesHandle  = get(objectHandle,'Parent');
-coordinates = get(axesHandle,'CurrentPoint');
-coordinates = round(coordinates(1,1:2));
-disp(coordinates);
+
+% CASE: Single Left-Click
+if strcmp(get(objectHandle,'SelectionType'), 'normal')
+  disp('Left Click');
+  axesHandle  = get(objectHandle,'Parent');
+  coordinates = get(axesHandle,'CurrentPoint');
+  coordinates = coordinates(1,1:2);
+  disp(coordinates);
+  
+% CASE: Double Left-Click
+elseif strcmp(get(objectHandle,'SelectionType'), 'open')
+  disp('Left Double Click')
+end
+
 
 
 
@@ -1259,57 +1279,64 @@ function handles = updateCplx(handles)
 img = handles.vvi.currentImage;
 
 % Take FFT First, if necessary
-if handles.vvi.fftMode > 0 && handles.vvi.fftMode < 20
+if handles.vvi.fftMode > 0 && handles.vvi.fftMode < 200
   % 2D FFT
   for ii = 1:size(img,4)
-    switch handles.vvi.fftMode
-      case 10
-        % No Shifts
-        img(:,:,:,ii) = ifft2(img(:,:,:,ii));
-      case 11
-        % Pre-Shift
-        img(:,:,:,ii) = ifft2(fftshift(img(:,:,:,ii)));
-      case 12
-        % Post-Shift
-        img(:,:,:,ii) = fftshift(ifft2(img(:,:,:,ii)));
-      case 13
-        % Both Shift
-        img(:,:,:,ii) = fftshift(ifft2(fftshift(img(:,:,:,ii))));
+    for jj = 1:size(img,3)
+      switch handles.vvi.fftMode
+        case 100
+          % No Shifts
+          img(:,:,jj,ii) = ifft2(img(:,:,jj,ii));
+        case 110
+          % Pre-Shift
+          img(:,:,jj,ii) = ifft2(fftshift(img(:,:,jj,ii)));
+        case 120
+          % Post-Shift
+          img(:,:,jj,ii) = fftshift(ifft2(img(:,:,jj,ii)));
+        case 130
+          % Both Shift
+          img(:,:,jj,ii) = fftshift(ifft2(fftshift(img(:,:,jj,ii))));
+      end
     end
   end
   
-elseif handles.vvi.fftMode > 10
+elseif handles.vvi.fftMode > 100
   % 3D FFT
   for ii = 1:size(img,4)
     switch handles.vvi.fftMode
-      case 20
+      case 200
         % No Shifts
         img(:,:,:,ii) = ifftn(img(:,:,:,ii));
-      case 21
+      case 210
         % Pre-Shift
         img(:,:,:,ii) = ifftn(fftshift(img(:,:,:,ii)));
-      case 22
+      case 220
         % Post-Shift
         img(:,:,:,ii) = fftshift(ifftn(img(:,:,:,ii)));
-      case 23
+      case 230
         % Both Shift
         img(:,:,:,ii) = fftshift(ifftn(fftshift(img(:,:,:,ii))));
     end
   end
 end
 
-% Take mag/phase/real/imag as appropriate
-switch handles.vvi.complexMode
-  case 0
-    img = double(abs(img));
-  case 1
-    img = double(angle(img));
-  case 2
-    img = double(real(img));
-  case 3
-    img = double(imag(img));
-  case 4
-    % Do nothing here
+if handles.vvi.isComplex == 0
+  % Just display the image - no complex operations are needed
+  img = double(img);
+else
+  % Take mag/phase/real/imag as appropriate
+  switch handles.vvi.complexMode
+    case 0
+      img = double(abs(img));
+    case 1
+      img = double(angle(img));
+    case 2
+      img = double(real(img));
+    case 3
+      img = double(imag(img));
+    case 4
+      % Do nothing here
+  end
 end
 
 % Remove NaN and Infs from the image
@@ -1333,17 +1360,19 @@ end
 
 % If its larger than 4-D, remove higher dimensions
 if ndims(img) > 4
-  img = img(:,:,:,:,1,1,1,1,1,1,1,1,1,1,1,1,1,1);
+  img = img(:,:,:,:,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1);
   textMessage(handles, 'info', 'Only first 4D of image loaded.');
 end
 
-% Check if the image is complex to disable the popupComplex control
+% Check if the image is real vs. complex to disable the popupComplex control
 if isreal(img)
   % Disable the mag/phase/real/imag control
-  handles.vvi.complexMode = 0;
+  handles.vvi.isComplex = 0;
+  set(handles.popupComplex, 'Value' , 1);       % String #1 = Magnitude
   set(handles.popupComplex, 'Enable', 'off');
   
 else
+  handles.vvi.isComplex = 1;
   set(handles.popupComplex, 'Enable', 'on');
   
 end
@@ -1353,28 +1382,28 @@ end
 %       the image after the abs/angle/real/imag operation
 %       has been done
 
-% Update current image
+% Update current image value and name
 handles.vvi.currentImage = img;
-
-% Update the image name
 handles.vvi.currentName = get(handles.editVar, 'String');
 
-% Update the complex representation of the image in handles.vvi.displayImage
+% Update the complex representation of the display image in handles.vvi.displayImage
 handles = updateCplx(handles);
 
-% Grab the min & max
-handles.vvi.min = min(img(:));
-handles.vvi.max = max(img(:));
+% Grab the current display image to set window/levels
+img     = handles.vvi.displayImage;
 
-% We don't want complex numbers here
-if ~isreal(handles.vvi.min) || ~isreal(handles.vvi.max)
-  handles.vvi.min = abs(handles.vvi.min);
-  handles.vvi.max = abs(handles.vvi.max);
+% Grab the min & max
+if handles.vvi.isComplex == 0
+  handles.vvi.min = min(img(:));
+  handles.vvi.max = max(img(:));
+else
+  handles.vvi.min = min(abs(img(:)));
+  handles.vvi.max = max(abs(img(:)));
 end
 
-if handles.vvi.max == 0
-  % If the image is totally blank, just set it to 1
-  handles.vvi.max = 1;
+if handles.vvi.max < handles.vvi.min
+  % If max is less than min, set it to min + 10%
+  handles.vvi.max = handles.vvi.min * 1.10;
 end
 
 if handles.vvi.min > handles.vvi.max
@@ -1391,7 +1420,7 @@ handles.vvi.imageSize = size(img);
 % Fix size for 2-D and 3-D images
 if ndims(img) < 4
   handles.vvi.imageSize(4) = 1;
-elseif ndims(img) < 3
+elseif ndims(img) < 3 %#ok<ISMAT>
   handles.vvi.imageSize(3) = 1;
   handles.vvi.imageSize(4) = 1;
 end
@@ -1400,7 +1429,7 @@ end
 handles.vvi.currentSlice = round(size(img, 3)/2);
 set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
 
-% Take the first phase as default
+% Take first phase as current phase
 handles.vvi.currentPhase = 1;
 set(handles.editPhase, 'String', num2str(handles.vvi.currentPhase));
 
@@ -1410,7 +1439,7 @@ function textMessage(handles, type, msg)
 
   if strcmp(type, 'err')
     disp(['ERROR: ' msg]);
-    axes(handles.mainAxes); %#ok<MAXES>
+    axes(handles.mainAxes);
     text(2,4, ['ERROR: ' msg], 'HorizontalAlignment','left', 'FontSize', 12, 'Color', 'red');
   else
     if size(msg, 2) == 1
@@ -1418,7 +1447,7 @@ function textMessage(handles, type, msg)
     else
       disp(msg);
     end
-    axes(handles.mainAxes); %#ok<MAXES>
+    axes(handles.mainAxes);
     if size(msg, 2) == 1
       text(2,4, ['INFO: '  msg], 'HorizontalAlignment','left', 'FontSize', 12, 'Color', 'white');
     else
@@ -1427,81 +1456,6 @@ function textMessage(handles, type, msg)
   end
   
 pause(1);
-
-
-% ======= More Callbacks Below =====================================
-% Required to be here in order to avoid errors when clicking on 
-% certain GUI elements
-
-% --- If Enable == 'on', executes on mouse press in 5 pixel border.
-% --- Otherwise, executes on mouse press in 5 pixel border or over pushImg.
-function pushImg_ButtonDownFcn(hObject, eventdata, handles)
-
-
-% --- Executes during object creation, after setting all properties.
-function popupColormap_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to popupColormap (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: popupmenu controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-
-% --- Executes during object creation, after setting all properties.
-function editMin_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editMin (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function editMax_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editMax (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function editSlice_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editSlice (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function editPhase_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editPhase (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
 
 
 % --- Executes on selection change in popupComplex.
@@ -1517,7 +1471,7 @@ function popupComplex_Callback(hObject, eventdata, handles)
 contents = cellstr(get(hObject,'String'));
 cm       = strtrim(contents{get(hObject,'Value')});
 
-% Check for custom maps jet2 or hsv2
+% Check for custom color maps (_Mask)
 set(handles.popupColormap, 'Enable', 'on');    % Re-enable colormap choice
 
 if strcmp(cm, 'Magnitude')
@@ -1724,21 +1678,26 @@ function panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
 
 % Update the fftMode based on the radio buttons and check boxes
 if get(handles.radioImageSpace, 'Value') == 1
-  handles.vvi.fftMode = 0;
+  handles.vvi.fftMode = 000;
 elseif get(handles.radio2DFFT, 'Value') == 1
-  handles.vvi.fftMode = 10;
+  handles.vvi.fftMode = 100;
 else
-  handles.vvi.fftMode = 20;
+  handles.vvi.fftMode = 200;
 end
 
 % Pre-shift
 if get(handles.checkPreShift, 'Value') == 1
-  handles.vvi.fftMode = handles.vvi.fftMode + 1;
+  handles.vvi.fftMode = handles.vvi.fftMode + 10;
 end
 
 % Post-shift
 if get(handles.checkPostShift, 'Value') == 1
-  handles.vvi.fftMode = handles.vvi.fftMode + 2;
+  handles.vvi.fftMode = handles.vvi.fftMode + 20;
+end
+
+% Log scale
+if get(handles.checkLog, 'Value') == 1
+  handles.vvi.fftMode = handles.vvi.fftMode + 1;
 end
 
 % Update the image
@@ -1999,43 +1958,6 @@ else
 end
 
 
-% --- Executes during object creation, after setting all properties.
-function editRx_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editRx (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function editRy_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editRy (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
-
-
-% --- Executes during object creation, after setting all properties.
-function editRz_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to editRz (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
 
 
 % --- Executes on button press in pushWriteOut.
@@ -2067,3 +1989,111 @@ tmp(tmp > 1) = 1; % Clip values above max
 filename = inputdlg('Save TIFF As:');
 filename = filename{1};
 imwrite(tmp, filename);
+
+% ======= Object Creation Callbacks Section ====================================
+% Required to be here in order to avoid errors when clicking on 
+% certain GUI elements, but otherwise unused for vvi functionality
+
+% --- If Enable == 'on', executes on mouse press in 5 pixel border.
+% --- Otherwise, executes on mouse press in 5 pixel border or over pushImg.
+function pushImg_ButtonDownFcn(hObject, eventdata, handles)
+
+
+% --- Executes during object creation, after setting all properties.
+function popupColormap_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to popupColormap (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: popupmenu controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Executes during object creation, after setting all properties.
+function editMin_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to editMin (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Executes during object creation, after setting all properties.
+function editMax_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to editMax (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Executes during object creation, after setting all properties.
+function editSlice_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to editSlice (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Executes during object creation, after setting all properties.
+function editPhase_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to editPhase (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Executes during object creation, after setting all properties.
+function editRx_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to editRx (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Executes during object creation, after setting all properties.
+function editRy_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to editRy (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+% --- Executes during object creation, after setting all properties.
+function editRz_CreateFcn(hObject, eventdata, handles)
+% hObject    handle to editRz (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    empty - handles not created until after all CreateFcns called
+
+% Hint: edit controls usually have a white background on Windows.
+%       See ISPC and COMPUTER.
+if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
+    set(hObject,'BackgroundColor','white');
+end
+
+
+% ======= END Object Creation Callbacks Section ================================
