@@ -1389,7 +1389,7 @@ handles.vvi.currentName = get(handles.editVar, 'String');
 % Update the complex representation of the display image in handles.vvi.displayImage
 handles = updateCplx(handles);
 
-% Grab the current display image to set window/levels
+% Grab the current display image to set min/max, rather than using global values
 img     = handles.vvi.displayImage;
 
 % Grab the min & max
@@ -1679,10 +1679,20 @@ function panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
 % Update the fftMode based on the radio buttons and check boxes
 if get(handles.radioImageSpace, 'Value') == 1
   handles.vvi.fftMode = 000;
+  
+  % Go back to base image and see if it is complex-valued
+  if isreal(handles.vvi.currentImage)
+    handles.vvi.isComplex = 0;
+  else
+    handles.vvi.isComplex = 1;
+  end
+  
 elseif get(handles.radio2DFFT, 'Value') == 1
   handles.vvi.fftMode = 100;
+  handles.vvi.isComplex = 1;
 else
   handles.vvi.fftMode = 200;
+  handles.vvi.isComplex = 1;
 end
 
 % Pre-shift
@@ -1702,7 +1712,6 @@ end
 
 % Update the image
 handles = updateCplx(handles);
-
 handles = imageDisp(handles);
 
 % Update handles structure
@@ -1721,6 +1730,14 @@ panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
 
 % --- Executes on button press in checkPostShift.
 function checkPostShift_Callback(hObject, eventdata, handles)
+% hObject    handle to checkPostShift (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hint: get(hObject,'Value') returns toggle state of checkPostShift
+panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
+
+function checkLog_Callback(hObject, eventdata, handles)
 % hObject    handle to checkPostShift (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
