@@ -1414,6 +1414,16 @@ function imageClick(objectHandle, eventData, hObject)
 % Get fresh GUI data
 handles = guidata(hObject);
 
+% Workaround for old matlab version that does not support eventData
+v = ver('MATLAB');
+if str2double(v.Version) < 8.4
+  % Old version - use alternative means of getting needed fields
+  eventData.Button = 1;
+  pt = get(gca, 'CurrentPoint');
+  eventData.IntersectionPoint(1) = pt(1,1);
+  eventData.IntersectionPoint(2) = pt(1,2);
+end
+% </WORKAROUND>
 
 % Only execute this function for non-montage, if lock is not set, and if left click
 if (handles.vvi.montage == 0) && (eventData.Button == 1) && (handles.vvi.textLock ~= 1)
