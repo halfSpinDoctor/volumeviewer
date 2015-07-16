@@ -31,6 +31,12 @@ function varargout = vvi(varargin)
 %      imageSize    - the matrix dimensions of the currently loaded image
 %      imageDims    - the spatial dimensions (mm) of the currently loaded image
 %
+%      selCoords    - current selected image coordinates from imageClick
+%      selValue     - instensity of current selected coordinates
+%      textHandle   - handles to annotation text object
+%      textLock     - 'thread locking' so that multiple callbacks to imageClick
+%                     do not generate multiple text objects concurrently
+%
 %      currentVars  - the current workspace variables
 %      montage      - 0 = use imagesc,  1 = use imsc
 %
@@ -41,14 +47,14 @@ function varargout = vvi(varargin)
 %                     3rd digit 0 = linear    2 = log scale
 %
 % Custom Variables for QMRI Mode (handles.vvi.qmri)
-%      qmri_mode         - 0 = DESPOT1 1 = DESPOT2-FM 3 = mcDESPOT
+%      qmri_mode         - 0 = OFF 1 = DESPOT1 2 = DESPOT2-FM 3 = mcDESPOT
 %      mcdespot_settings - path to _mcdespot_settings file
 %      data_spgr         - SPGR data matrix 4D
 %      data_ssfp_0       - SSFP data matrix 4D
 %      data_ssfp_180     - SSFP data matrix 4D
 %      mcd_fv            - fitted values (FV), 3D
-%      qmri_voxidx       - index of selected voxel on-screen
-%
+%      fitHandle         - handle to plot with data points and fitted curve overlaid
+%      contractHandle    - handle to figure with contractionSteps plotted
 %
 % Custom Functions
 %      imageDisp   - display an image with custom scale [min max] and custom colormap
@@ -58,7 +64,7 @@ function varargout = vvi(varargin)
 %      loadVars    - refresh list of base workspace variables
 %      loadImage   - load in an image from the base workspace into vvi
 %      textMessage - display a custom  message in the terminal & on image
-%      ImageClickCallback - Callback to get image click coordinates
+%      imageClick  - Callback to get image click coordinates
 %
 % Builtin Dependancies
 %      phplot      - converts a complex dataset into a color-modulated image to visualize
@@ -103,7 +109,7 @@ function varargout = vvi(varargin)
 %             Implement code for log scale button in FFT panel.
 %
 %
-% Last Modified by GUIDE v2.5 13-Jul-2015 02:47:30
+% Last Modified by GUIDE v2.5 16-Jul-2015 15:25:39
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -125,7 +131,7 @@ end
 % End initialization code - DO NOT EDIT
 
 % == Begin Constants ==
-DEG_TO_RAD = pi/180;
+% DEG_TO_RAD
 % == End   Constants ==
 
 
@@ -142,7 +148,8 @@ handles.output = hObject;
 
 % Create a struct & default options for VVI
 handles.vvi = struct();
-handles.vvi.currentImage = magic(20);
+handles.vvi.displayImage = magic(10);
+handles.vvi.currentImage = magic(10);
 handles.vvi.colormap     = colormap('gray');
 handles.vvi.min          = 0;
 handles.vvi.max          = 1;
@@ -150,9 +157,14 @@ handles.vvi.currentSlice = 1;
 handles.vvi.currentPhase = 1;
 handles.vvi.imageSize    = [20 20 1 1];
 handles.vvi.imageDims    = [1  1  1];   % v3: Spatial Dims of Image (mm)
+handles.vvi.selCoords    = [1  1  1];   %     Current selected point from imageClick
+handles.vvi.selValue     = 0;
+handles.vvi.textHandle   = [];
+handles.vvi.textLock     = 0;
+handles.vvi.currentVars  = [];
 handles.vvi.montage      = 0;
-handles.vvi.isComplex    = 0;  % 0 = real-valued array, 1 = complex-valued array
-handles.vvi.complexMode  = 0;  % 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
+handles.vvi.isComplex    = 0;   % 0 = real-valued array, 1 = complex-valued array
+handles.vvi.complexMode  = 0;   % 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
 handles.vvi.fftMode      = 000; % 000 = Image Space, no shift, linear scale
 
 % Populate image with Matlab logo
@@ -254,7 +266,7 @@ handles = loadVars(handles);
 handles = loadImage(handles);
 
 % Display the image
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -275,7 +287,7 @@ else
   handles.vvi.montage = 1;
 end
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -964,7 +976,7 @@ else
 end
 
 % Update image
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -986,7 +998,7 @@ if handles.vvi.min > handles.vvi.max
   textMessage(handles, 'err', 'You set the min higher than the max')
 end
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1006,7 +1018,7 @@ if handles.vvi.min > handles.vvi.max
   textMessage(handles, 'err', 'You set the max higher than the min');
 end
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1051,7 +1063,7 @@ set(handles.editMin, 'String', num2str(handles.vvi.min));
 set(handles.editMax, 'String', num2str(handles.vvi.max));
 
 % Update the image
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1074,7 +1086,7 @@ else
   handles.vvi.currentSlice = slice;
 end
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1090,7 +1102,7 @@ function pushSliceDown_Callback(hObject, eventdata, handles)
 if ~(handles.vvi.currentSlice == 1)
   handles.vvi.currentSlice = handles.vvi.currentSlice - 1;
   set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
-  handles = imageDisp(handles);
+  handles = imageDisp(hObject, handles);
 end
 
 % Update handles structure
@@ -1107,7 +1119,7 @@ function pushSliceUp_Callback(hObject, eventdata, handles)
 if ~(handles.vvi.currentSlice == handles.vvi.imageSize(3))
   handles.vvi.currentSlice = handles.vvi.currentSlice + 1;
   set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
-  handles = imageDisp(handles);
+  handles = imageDisp(hObject, handles);
 end
 
 % Update handles structure
@@ -1131,7 +1143,7 @@ else
   handles.vvi.currentPhase = phase;
 end
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1148,7 +1160,7 @@ function pushPhaseDown_Callback(hObject, eventdata, handles)
 if ~(handles.vvi.currentPhase == 1)
   handles.vvi.currentPhase = handles.vvi.currentPhase - 1;
   set(handles.editPhase, 'String', num2str(handles.vvi.currentPhase));
-  handles = imageDisp(handles);
+  handles = imageDisp(hObject, handles);
 end
 
 % Update handles structure
@@ -1165,7 +1177,7 @@ function pushPhaseUp_Callback(hObject, eventdata, handles)
 if ~(handles.vvi.currentPhase == handles.vvi.imageSize(4))
   handles.vvi.currentPhase = handles.vvi.currentPhase + 1;
   set(handles.editPhase, 'String', num2str(handles.vvi.currentPhase));
-  handles = imageDisp(handles);
+  handles = imageDisp(hObject, handles);
 end
 
 % Update handles structure
@@ -1192,7 +1204,7 @@ handles.vvi.currentSlice = phase;
 set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
 set(handles.editPhase, 'String', num2str(handles.vvi.currentPhase));
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1309,9 +1321,12 @@ for ii = 1:size(x, 1)
 end
 
 % Convert from cell array to string
-handles.vvi.currentVars = [];
 for ii = 1:size(z, 2)
-  handles.vvi.currentVars = strvcat(handles.vvi.currentVars, z{ii});
+  if ii == 1
+    handles.vvi.currentVars = z{ii};
+  else
+    handles.vvi.currentVars = char(handles.vvi.currentVars, z{ii});
+  end
 end
 
 % Update the string in listVars
@@ -1358,7 +1373,7 @@ light('Position',[.5 -1 .4], ...
   
 
 % --- Display image on mainAxes ---
-function handles = imageDisp(handles)
+function handles = imageDisp(hObject, handles)
 
 axes(handles.mainAxes);
 
@@ -1381,30 +1396,135 @@ axis image;
 axis off;
 colorbar;
 
-% Set image handle to call ImageClickCallback
-set(imageHandle,'ButtonDownFcn',@ImageClickCallback);
+% Set image handle to call imageClick callback
+set(imageHandle, 'ButtonDownFcn', {@imageClick, hObject});
+
+% Create image pixel info corner
+hPixelinfo = impixelinfoval(handles.figure1, imageHandle);
+set(hPixelinfo, 'FontName', 'Tahoma');
+set(hPixelinfo, 'FontSize', 11.0);
 
 % Save handle to image for GUI click interface
 handles.vvi.imageHandle = imageHandle;
 
 
 % --- Callback to return image click coordinates ---
-function ImageClickCallback (objectHandle , eventData)
+function imageClick(objectHandle, eventData, hObject)
 
-% CASE: Single Left-Click
-if strcmp(get(objectHandle,'SelectionType'), 'normal')
-  disp('Left Click');
-  axesHandle  = get(objectHandle,'Parent');
-  coordinates = get(axesHandle,'CurrentPoint');
-  coordinates = coordinates(1,1:2);
-  disp(coordinates);
+% Get fresh GUI data
+handles = guidata(hObject);
+
+
+% Only execute this function for non-montage, if lock is not set, and if left click
+if (handles.vvi.montage == 0) && (eventData.Button == 1) && (handles.vvi.textLock ~= 1)
   
-% CASE: Double Left-Click
-elseif strcmp(get(objectHandle,'SelectionType'), 'open')
-  disp('Left Double Click')
+  if handles.vvi.montage
+    % X-Y click coordinates - calibration factor
+    selCoords(1) = eventData.IntersectionPoint(2);
+    selCoords(2) = eventData.IntersectionPoint(1);
+    selCoords(3) = handles.vvi.currentSlice;
+  else
+    selCoords(1) = eventData.IntersectionPoint(2) - 0.02;
+    selCoords(2) = eventData.IntersectionPoint(1) - 0.02;
+    selCoords(3) = handles.vvi.currentSlice;
+  end
+  
+  selCoords  = round(selCoords);
+  
+  % Make sure selected coordinates are within image matrix indicies
+  if selCoords(1) < 1
+    selCoords(1) = 1;
+  elseif selCoords(1) > size(handles.vvi.displayImage, 1)
+    selCoords(1) = size(handles.vvi.displayImage, 1);
+  end
+  
+  if selCoords(2) < 1
+    selCoords(2) = 1;
+  elseif selCoords(2) > size(handles.vvi.displayImage, 2)
+    selCoords(2) = size(handles.vvi.displayImage, 2);
+  end
+  
+  % Image value at X-Y coordinates
+  selValue = handles.vvi.displayImage(selCoords(1), selCoords(2), selCoords(3), :);
+  
+  % DEBUG: Display unrounded selection values
+  % disp(['FLOAT COORDS: X:' num2str(selCoords(1)) ' Y:' num2str(selCoords(2)) ' V:' num2str(selValue)]);
+  
+  % Format leading zeros for display
+  if     handles.vvi.imageSize(1) <   10 && handles.vvi.imageSize(2) <   10
+    strFormat = '%01.0f';
+  elseif handles.vvi.imageSize(1) <  100 && handles.vvi.imageSize(2) <  100
+    strFormat = '%02.0f';
+  elseif handles.vvi.imageSize(1) < 1000 && handles.vvi.imageSize(2) < 1000
+    strFormat = '%03.0f';
+  else
+    strFormat = '%.0f';
+  end
+  
+  % Create X/Y/V string
+  msgString = ['Selected: X:' num2str(selCoords(1), strFormat) ' Y:' num2str(selCoords(2), strFormat) ' V:' num2str(selValue(1))];
+  
+  % == Image Marker Code Below ==
+  img = handles.vvi.displayImage(:,:,handles.vvi.currentSlice,handles.vvi.currentPhase);
+  
+  % Make sure marker indicies do not go past bounds of image indicies
+  xFarLeft  = max(selCoords(1)-3, 1);
+  xLeft     = max(selCoords(1)-1, 1);
+  xFarRight = min(selCoords(1)+3, size(img,1));
+  xRight    = min(selCoords(1)+1, size(img,1));
+  
+  yFarLeft  = max(selCoords(2)-3, 1);
+  yLeft     = max(selCoords(2)-1, 1);
+  yFarRight = min(selCoords(2)+3, size(img,2));
+  yRight    = min(selCoords(2)+1, size(img,2));
+  
+  % Put marker on image
+  if handles.vvi.complexMode == 4
+    
+    % Apply Phplot to make colour phase map
+    img = phplot(img, handles.vvi.max);
+    
+    % Use a white cross for colour phase images
+    img([xFarLeft:xLeft xRight:xFarRight],selCoords(2),:) = 255;
+    img(selCoords(1),[yFarLeft:yLeft yRight:yFarRight],:) = 255;
+  else
+    
+    % Use inverted cross. Overlapping crosses make centre pixel the original value
+    maxVal = max(img(:));
+    img(xFarLeft:xFarRight,selCoords(2),:) = maxVal - img(xFarLeft:xFarRight,selCoords(2),:);
+    img(selCoords(1),yFarLeft:yFarRight,:) = maxVal - img(selCoords(1),yFarLeft:yFarRight,:);
+  end
+  
+  set(objectHandle, 'CData', img);
+  % == DONE Image Marker Code ==
+  
+  if isa(handles.vvi.textHandle, 'handle') && isvalid(handles.vvi.textHandle)
+    
+    % Set the text in the existing object
+    set(handles.vvi.textHandle, 'String', msgString);
+    
+    % Also display updated text on command line
+    disp([msgString]);
+  
+  else
+    % Set lock in handles structure
+    handles.vvi.textLock   = 1;
+    guidata(hObject, handles);
+    
+    % Create new text graphics object - this will also show on the cmd line
+    handles.vvi.textHandle = textMessage(handles, [], msgString);
+    
+    % Unset lock in handles structure
+    handles.vvi.textLock   = 0;
+    guidata(hObject, handles);
+  end
+  
+  % Update the handles.vvi structure with new values
+  handles.vvi.selCoords = selCoords;
+  handles.vvi.selValue  = selValue;
+  guidata(hObject, handles);
+ 
 end
-
-
 
 
 % --- Update the complex representation of an image ---
@@ -1516,9 +1636,10 @@ end
 %       the image after the abs/angle/real/imag operation
 %       has been done
 
-% Update current image value and name
+% Update current image value, name, and selCoords
 handles.vvi.currentImage = img;
-handles.vvi.currentName = get(handles.editVar, 'String');
+handles.vvi.currentName  = get(handles.editVar, 'String');
+handles.vvi.selCoords   = [1 1 1];
 
 % Update the complex representation of the display image in handles.vvi.displayImage
 handles = updateCplx(handles);
@@ -1569,12 +1690,12 @@ set(handles.editPhase, 'String', num2str(handles.vvi.currentPhase));
 
 
 % --- Display a text message, both on the image itself and the command window ---
-function textMessage(handles, type, msg)
+function tHandle = textMessage(handles, type, msg)
 
   if strcmp(type, 'err')
     disp(['ERROR: ' msg]);
     axes(handles.mainAxes);
-    text(2,4, ['ERROR: ' msg], 'HorizontalAlignment','left', 'FontSize', 12, 'Color', 'red');
+    tHandle = text(2,5, ['ERROR: ' msg], 'HorizontalAlignment','left', 'FontName', 'Tahoma', 'FontSize', 12, 'Color', 'red', 'BackgroundColor', 'black');
   else
     if size(msg, 2) == 1
       disp(['INFO: ' msg]);
@@ -1583,9 +1704,9 @@ function textMessage(handles, type, msg)
     end
     axes(handles.mainAxes);
     if size(msg, 2) == 1
-      text(2,4, ['INFO: '  msg], 'HorizontalAlignment','left', 'FontSize', 12, 'Color', 'white');
+      tHandle = text(2,5, ['INFO: '  msg], 'HorizontalAlignment','left', 'FontName', 'Tahoma', 'FontSize', 12, 'Color', 'white', 'BackgroundColor', 'black');
     else
-      text(2,4, msg, 'HorizontalAlignment','left', 'FontSize', 12, 'Color', 'white');
+      tHandle = text(2,5, msg, 'HorizontalAlignment','left', 'FontName', 'Tahoma', 'FontSize', 12, 'Color', 'white', 'BackgroundColor', 'black');
     end
   end
   
@@ -1632,7 +1753,7 @@ end
 handles = updateCplx(handles);
 
 % Display the image
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1718,7 +1839,7 @@ end
 handles.vvi.currentSlice = round(handles.vvi.imageSize(3)/2);
 set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1743,7 +1864,7 @@ end
 handles.vvi.currentSlice = round(handles.vvi.imageSize(3)/2);
 set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1765,7 +1886,7 @@ if numel(handles.vvi.imageSize) < 4
   handles.vvi.imageSize(4) = 1;
 end
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1780,7 +1901,7 @@ function pushFlipLR_Callback(hObject, eventdata, handles)
 % Do ImFlipLR
 handles.vvi.displayImage = imfliplr(handles.vvi.displayImage);
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1795,7 +1916,7 @@ function pushFlipUD_Callback(hObject, eventdata, handles)
 % Do ImFlipUD
 handles.vvi.displayImage = imflipud(handles.vvi.displayImage);
 
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -1828,6 +1949,16 @@ elseif get(handles.radio2DFFT, 'Value') == 1
 else
   handles.vvi.fftMode = 200;
   handles.vvi.isComplex = 1;
+end
+
+% Enable or Disable the mag/phase/real/imag control as needed
+if handles.vvi.isComplex == 0
+  
+  set(handles.popupComplex, 'Value' , 1);
+  set(handles.popupComplex, 'Enable', 'off');
+else
+  handles.vvi.isComplex = 1;
+  set(handles.popupComplex, 'Enable', 'on');
 end
 
 % Pre-shift
@@ -1873,7 +2004,7 @@ set(handles.editMin, 'String', num2str(handles.vvi.min));
 set(handles.editMax, 'String', num2str(handles.vvi.max));
 
 % Display the image
-handles = imageDisp(handles);
+handles = imageDisp(hObject, handles);
 
 % Update handles structure
 guidata(hObject, handles);
@@ -2155,7 +2286,7 @@ if handles.vvi.montage == 0
   end
   
 elseif handles.vvi.montage == 1
-  msgbox('Cannot write out direct TIFF in Montage Mode');
+  msgbox('Cannot write out direct image in Mosaic Mode');
 end
 
 % Scale tmp from 0->1
@@ -2257,11 +2388,14 @@ function mnuAbout_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 
-% -=-=-=-=-= Additional callbacks for FFT button presses =-=-=-=-=-
+% -=-=-=-=-= Callbacks for FFT button presses =-=-=-=-=-
 % This is because, on OSX, the panelSelectionChange callback is fired
 % for toggle button presses, the same as if they were radioButtons
 % But on Win32, this is not the case. So put in extra callbacks on
 % buttonPress to fire the panelSelectionChange event
+%
+% Removed the panel's callback for panelSelectionChange so that
+% the event is not fired twice.
 %
 % SAH v3.3
 
@@ -2290,3 +2424,5 @@ function radio3DFFT_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 
 panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
+
+% =-=-=-=-=- END FFT Button Press Callbacks =-=-=-=-=-=-=-=-=
