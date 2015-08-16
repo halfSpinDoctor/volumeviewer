@@ -2307,7 +2307,11 @@ tmp(tmp > 1) = 1; % Clip values above max
 
 filename = inputdlg('Save TIFF As:');
 filename = filename{1};
-imwrite(tmp, filename);
+
+% Re-scale to colormap index
+tmp = tmp .* size(handles.vvi.colormap,1);
+
+imwrite(tmp, handles.vvi.colormap, filename);
 
 % ======= Object Creation Callbacks Section ====================================
 % Required to be here in order to avoid errors when clicking on 
