@@ -47,12 +47,27 @@ function varargout = vvi(varargin)
 %                     3rd digit 0 = linear    2 = log scale
 %
 % Custom Variables for QMRI Mode (handles.vvi.qmri)
-%      qmri_mode         - 0 = OFF 1 = DESPOT1 2 = DESPOT2-FM 3 = mcDESPOT
-%      mcdespot_settings - path to _mcdespot_settings file
+%      mode         - 0 = OFF   1 = DESPOT1 2 = DESPOT2-FM 3 = mcDESPOT
+%      loaded       - 0 = FALSE 1 = DESPOT1 2 = DESPOT2-FM 3 = mcDESPOT
+%                     Check if data for the selected mode is already loaded
+%
+% Variables for mcDESPOT (handles.vvi.qmri.mcd)
+%      path              - path to mcDESPOT data directory
+%      file
+%      mcdespot_settings - data structure containing mcdespot_settings variables
+%
 %      data_spgr         - SPGR data matrix 4D
 %      data_ssfp_0       - SSFP data matrix 4D
 %      data_ssfp_180     - SSFP data matrix 4D
-%      mcd_fv            - fitted values (FV), 3D
+%
+%      pd_spgr           - SPGR proton density map
+%      pd_ssfp           - SSFP proton density map
+%
+%      fam               - DESPOT1 flip angle map
+%      omega             - DESPOT2 Off-resonance map
+%
+%      mcd_fv            - mcDESPOT model fitted values (FV), 3D
+%
 %      fitHandle         - handle to plot with data points and fitted curve overlaid
 %      contractHandle    - handle to figure with contractionSteps plotted
 %
@@ -66,6 +81,10 @@ function varargout = vvi(varargin)
 %      textMessage - display a custom  message in the terminal & on image
 %      imageClick  - Callback to get image click coordinates
 %
+%      loadMCD     - Given a directory as input, load all of the mcDESPOT
+%                    images and variables needed from run_mcdespot into
+%                    handles.vvi.qmri.mcd
+%
 % Builtin Dependancies
 %      phplot      - converts a complex dataset into a color-modulated image to visualize
 %                    phase and magnitude at the same time
@@ -74,7 +93,7 @@ function varargout = vvi(varargin)
 %
 % Samuel A. Hurley
 % University of Wisconsin
-% v3.2 10-Jul-2015
+% v3.3 12-Sep-2015
 %
 % Changelog:
 %     v1.0 Initial version 23-Aug-2011
@@ -108,8 +127,10 @@ function varargout = vvi(varargin)
 %             non-complex valued images due to abs() operation being performed.
 %             Implement code for log scale button in FFT panel.
 %
+%     v3.4  - Added options for mcDESPOT QMRI mode, and plotting of fit
 %
-% Last Modified by GUIDE v2.5 16-Jul-2015 15:25:39
+%
+% Last Modified by GUIDE v2.5 12-Sep-2015 16:22:59
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 0;
@@ -166,6 +187,30 @@ handles.vvi.montage      = 0;
 handles.vvi.isComplex    = 0;   % 0 = real-valued array, 1 = complex-valued array
 handles.vvi.complexMode  = 0;   % 0 = Mag, 1 = Phase, 2 = Real, 3 = Imag, 4 = Colour Phase
 handles.vvi.fftMode      = 000; % 000 = Image Space, no shift, linear scale
+
+% Variables for QMRI Mode
+handles.vvi.qmri.mode    = 0;   % 0 = OFF 1 = DESPOT1 2 = DESPOT2-FM 3 = mcDESPOT
+handles.vvi.qmri.loaded  = 0;   % 0 = no data loaded, do not plot, 1 = data loaded
+
+% Variables for mcDESPOT (handles.vvi.qmri.mcd)
+handles.vvi.qmri.mcd.path              = '';
+handles.vvi.qmri.mcd.file              = '';
+handles.vvi.qmri.mcd.mcdespot_settings = [];
+
+handles.vvi.qmri.mcd.data_spgr         = [];
+handles.vvi.qmri.mcd.data_ssfp_0       = [];
+handles.vvi.qmri.mcd.data_ssfp_180     = [];
+
+handles.vvi.qmri.mcd.pd_spgr           = [];
+handles.vvi.qmri.mcd.pd_ssfp           = [];
+
+handles.vvi.qmri.mcd.fam               = [];
+handles.vvi.qmri.mcd.omega             = [];
+
+handles.vvi.qmri.mcd.mcd_fv            = [];
+
+handles.vvi.qmri.mcd.fitHandle         = [];
+handles.vvi.qmri.mcd.contractHandle    = [];
 
 % Populate image with Matlab logo
 imageLogo(handles);
@@ -384,7 +429,6 @@ elseif strcmp(cm, 'Parula');
 
   
 elseif strcmp(cm, 'Parula_Mask')
-elseif strcmp(cm, 'Parula');
   % Hard-code parula so it works for older MATLAB versions
   handles.vvi.colormap = [...
    0.000000000000000   0.000000000000000   0.000000000000000
@@ -1287,8 +1331,6 @@ colorbar;
 savefig(fileName{1});
 
 
-
-
 % ========= SAH Functions Below =============================================
 
 % --- Populate the list with workspace variables
@@ -1533,6 +1575,56 @@ if (handles.vvi.montage == 0) && (eventData.Button == 1) && (handles.vvi.textLoc
   handles.vvi.selCoords = selCoords;
   handles.vvi.selValue  = selValue;
   guidata(hObject, handles);
+  
+  % If QMRI Mode is on (and data are loaded), do fit plots
+  if handles.vvi.qmri.mode == 3 && handles.vvi.qmri.loaded == 3
+    
+    % Setup function arguments
+    mcd = handles.vvi.qmri.mcd;
+    data_spgr_sl = squeeze(mcd.data_spgr(selCoords(1), selCoords(2), selCoords(3), :))';
+    data_ssfp_0_sl = squeeze(mcd.data_ssfp_0(selCoords(1), selCoords(2), selCoords(3), :))';
+    data_ssfp_180_sl = squeeze(mcd.data_ssfp_180(selCoords(1), selCoords(2), selCoords(3), :))';
+    
+    pd_spgr_sl = mcd.pd_spgr(selCoords(1), selCoords(2), selCoords(3));
+    pd_ssfp_sl = mcd.pd_ssfp(selCoords(1), selCoords(2), selCoords(3));
+    
+    fam_sl = mcd.fam(selCoords(1), selCoords(2), selCoords(3));
+    omega_sl = mcd.omega(selCoords(1), selCoords(2), selCoords(3));
+
+    % 1st and 2nd element of IG are T1 and T2 single - not actually used in
+    % algorithm so just supply 1s for both of these values
+    ig = [1 1 pd_spgr_sl(:) pd_ssfp_sl(:)];
+    
+    numThreads = 1;
+    
+    % Call mcdespot_model_fit with debug == 2 to get plot fitted curve to data
+    try
+      figure(handles.vvi.qmri.mcd.fitHandle);
+    catch
+      handles.vvi.qmri.mcd.fitHandle = figure;
+      guidata(hObject, handles);
+    end
+    
+    DEBUG = 2;
+    [fv rnrm] = mcdespot_model_fit(data_spgr_sl, data_ssfp_0_sl, data_ssfp_180_sl, mcd.mcdespot_settings.alpha_spgr, mcd.mcdespot_settings.alpha_ssfp, mcd.mcdespot_settings.tr_spgr, mcd.mcdespot_settings.tr_ssfp, fam_sl(:), omega_sl(:), ig, numThreads, DEBUG);
+  
+    % Call mcdespot_model_fit again with debug == 4 to get plot of contraction steps
+    try
+      figure(handles.vvi.qmri.mcd.contractHandle);
+    catch
+      handles.vvi.qmri.mcd.contractHandle = figure;
+      guidata(hObject, handles);
+    end
+    
+    DEBUG = 4;
+    [fv rnrm] = mcdespot_model_fit(data_spgr_sl, data_ssfp_0_sl, data_ssfp_180_sl, mcd.mcdespot_settings.alpha_spgr, mcd.mcdespot_settings.alpha_ssfp, mcd.mcdespot_settings.tr_spgr, mcd.mcdespot_settings.tr_ssfp, fam_sl(:), omega_sl(:), ig, numThreads, DEBUG);
+  
+  end
+  
+  % Display mcDESPOT Parameters at this location
+  fv = squeeze(handles.vvi.qmri.mcd.mcd_fv(selCoords(1), selCoords(2), selCoords(3), :));
+  disp(['  ' num2str(fv(1)*1000, '%03.0f') ' ms  | ' num2str(fv(2)*1000, '%04.0f') ' ms |   ' num2str(fv(3)*1000, '%02.0f') ' ms   |  ' num2str(fv(4)*1000, '%03.0f') ' ms | ' num2str(fv(5)*100, '%02.0f') '% | ' num2str(fv(6)*1000, '%03.0f') ' ms']);
+  
  
 end
 
@@ -1721,6 +1813,134 @@ function tHandle = textMessage(handles, type, msg)
   end
   
 pause(1);
+
+% -- Load in all needed mcDESPOT variables --
+% -- Based on run_mcdespot.m               --
+
+function handles = loadMCD(handles)
+
+disp('QMRI: Begin loading mcDESPOT data, calibration, and parameter maps...');
+
+% Get the full path and file name for _mcdespot_settings.mat from handles
+mcdespot_settings_fname = [handles.vvi.qmri.mcd.path handles.vvi.qmri.mcd.name];
+
+% Check that mat-file exists
+if ~exist(mcdespot_settings_fname, 'file');
+	textMessage(handles, 'err', '_mcdespot_settings.mat not found.')
+  return;
+end
+
+% Change directory 
+initialDir = pwd();
+cd(handles.vvi.qmri.mcd.path);
+
+% Load settings file
+handles.vvi.qmri.mcd.mcdespot_settings = load(mcdespot_settings_fname);
+
+% -- Modified code from run_mcdespot.m --
+
+% Try to load the T1 and flip angle map, if they exist
+if isfield(handles.vvi.qmri.mcd.mcdespot_settings.status, 'despot1') && handles.vvi.qmri.mcd.mcdespot_settings.status.despot1 == 1 %#ok<*NODEF>
+  % Load the t1 map
+  handles.vvi.qmri.mcd.pd_spgr = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.DESPOT1 'DESPOT1-PD.nii']);
+  % handles.vvi.qmri.mcd.t1    = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.DESPOT1 'DESPOT1-T1.nii']);
+  handles.vvi.qmri.mcd.fam     = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.DESPOT1 'DESPOT1-FAM.nii']);
+  disp('DESPOT1 data loaded.');
+else
+  error('Must run DESPOT1-HIFI first to obtain FAM and T1 map');
+end
+
+% Try to load the T2 and off-resonance map, if they exist
+if isfield(handles.vvi.qmri.mcd.mcdespot_settings.status, 'despot2') && handles.vvi.qmri.mcd.mcdespot_settings.status.despot2 == 1
+  % Load the t1 map
+  handles.vvi.qmri.mcd.pd_ssfp = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.DESPOT1 'DESPOT2-PD.nii']);
+  % handles.vvi.qmri.mcd.t2    = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.DESPOT1 'DESPOT2-T2.nii']);
+  handles.vvi.qmri.mcd.omega   = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.DESPOT1 'DESPOT2-Omega.nii']);
+  disp('DESPOT2 data loaded.');
+else
+  error('Must run DESPOT2-FM first to obtain Omega and T2 map');
+end
+
+% Try to load the multi-component maps, if they exist
+if isfield(handles.vvi.qmri.mcd.mcdespot_settings.status, 'mcdespot') && handles.vvi.qmri.mcd.mcdespot_settings.status.mcdespot > 0
+  % Load the t1 map
+  mcd_fv(:,:,:,1) = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.MCDESPOT 'mcDESPOT-T1m.nii']);
+  mcd_fv(:,:,:,2) = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.MCDESPOT 'mcDESPOT-T1f.nii']);
+  mcd_fv(:,:,:,3) = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.MCDESPOT 'mcDESPOT-T2m.nii']);
+  mcd_fv(:,:,:,4) = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.MCDESPOT 'mcDESPOT-T2f.nii']);
+  mcd_fv(:,:,:,5) = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.MCDESPOT 'mcDESPOT-MWF.nii']);
+  mcd_fv(:,:,:,6) = load_nifti([handles.vvi.qmri.mcd.mcdespot_settings.dir.MCDESPOT 'mcDESPOT-Tau.nii']);
+
+  handles.vvi.qmri.mcd.mcd_fv = mcd_fv;
+  
+  disp('mcDESPOT data loaded.');
+else
+  error('Must run mcDESPOT first to obtain multicomponent maps.');
+end
+
+% Load MR Data. Will automatically choose coreg data, if it exists
+img = load_mcdespot_series();
+
+spgr     = img.spgr;
+ssfp_0   = img.ssfp_0;
+ssfp_180 = img.ssfp_180;
+clear img;
+
+% Rescale data 
+handles.vvi.qmri.mcd.data_spgr     = spgr     ./ handles.vvi.qmri.mcd.mcdespot_settings.status.despot1_signalScale;
+handles.vvi.qmri.mcd.data_ssfp_0   = ssfp_0   ./ handles.vvi.qmri.mcd.mcdespot_settings.status.despot2_signalScale;
+handles.vvi.qmri.mcd.data_ssfp_180 = ssfp_180 ./ handles.vvi.qmri.mcd.mcdespot_settings.status.despot2_signalScale;
+clear spgr ssfp_0 ssfp_180;
+
+% -- End code from run_mcdespot.m --
+
+% Also load mcd_fv into base workspace: Save to .mat, load in base scope, cleanup tmp
+save('tmp_mcd_128', 'mcd_fv');
+evalin('base', 'load(''tmp_mcd_128'');');
+delete('tmp_mcd_128.mat');
+clear mcd_fv;
+
+% Spawn two figure windows for plotting mcDESPOT fit and contraction steps
+handles.vvi.qmri.mcd.fitHandle      = figure;
+
+% Setup fit window titles
+xlabel('flip angle [deg]');
+ylabel('MR signal [a.u.]');
+
+handles.vvi.qmri.mcd.contractHandle = figure;
+
+% Setup subplots for contraction steps
+
+% Contraction Step 1
+for ii = 1:4
+  subplot(4,3,3*ii-2);
+  xlabel('T1m [s]');
+  ylabel('T1f [s]');
+  
+  subplot(4,3,3*ii-1);
+  xlabel('T2m [s]');
+  ylabel('T2f [s]');
+  
+  subplot(4,3,3*ii);
+  xlabel('MWF');
+  ylabel('Tau [s]');
+end
+
+disp('All mcDESPOT data, calibration, and parameter maps loaded.');
+
+% Header for plotting display
+disp('----------|---------|-----------|---------|-----|--------');
+disp(['Dataset: ' handles.vvi.qmri.mcd.path                     ]);
+disp('----------|---------|-----------|---------|-----|--------');
+disp('T1 Myelin | T1 Free | T2 Myelin | T2 Free | MWF |  Tau   ');
+disp('----------|---------|-----------|---------|-----|--------');
+
+% CD back to initial directory
+cd(initialDir);
+
+
+
+% ========= END SAH Functions  =============================================
 
 
 % --- Executes on selection change in popupComplex.
@@ -1963,7 +2183,6 @@ end
 
 % Enable or Disable the mag/phase/real/imag control as needed
 if handles.vvi.isComplex == 0
-  
   set(handles.popupComplex, 'Value' , 1);
   set(handles.popupComplex, 'Enable', 'off');
 else
@@ -1972,7 +2191,7 @@ else
 end
 
 % Pre-shift
-if get(handles.checkPreShift, 'Value') == 1
+if get(handles.checkPreShift,  'Value') == 1
   handles.vvi.fftMode = handles.vvi.fftMode + 10;
 end
 
@@ -1982,7 +2201,7 @@ if get(handles.checkPostShift, 'Value') == 1
 end
 
 % Log scale
-if get(handles.checkLog, 'Value') == 1
+if get(handles.checkLog,       'Value') == 1
   handles.vvi.fftMode = handles.vvi.fftMode + 1;
 end
 
@@ -2440,3 +2659,68 @@ function radio3DFFT_Callback(hObject, eventdata, handles)
 panelFFT_SelectionChangeFcn(hObject, eventdata, handles)
 
 % =-=-=-=-=- END FFT Button Press Callbacks =-=-=-=-=-=-=-=-=
+
+
+
+% =-=-=-=-=- QMRI Mode Callbacks =-=-=-=-=-=-=-=-=
+
+% --- Executes on button press in rdoQmriOff.
+function rdoQmriOff_Callback(hObject, eventdata, handles)
+% hObject    handle to rdoQmriOff (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hint: get(hObject,'Value') returns toggle state of rdoQmriOff
+
+handles.vvi.qmri.mode = 0; % Set mode to OFF
+
+% Turn off the 'Load' button for mcDESPOT
+set(handles.pushLoadMcd, 'Enable', 'off');
+
+% Update handles structure
+guidata(hObject, handles);
+
+% --- Executes on button press in rdoQmriMcd.
+function rdoQmriMcd_Callback(hObject, eventdata, handles)
+% hObject    handle to rdoQmriMcd (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% Hint: get(hObject,'Value') returns toggle state of rdoQmriMcd
+
+handles.vvi.qmri.mode = 3; % Set mode to mcDESPOT
+
+% Turn on the 'Load' button for mcDESPOT
+set(handles.pushLoadMcd, 'Enable', 'on');
+
+% Update handles structure
+guidata(hObject, handles);
+
+% --- Executes on button press in pushLoadMcd.
+function pushLoadMcd_Callback(hObject, eventdata, handles)
+% hObject    handle to pushLoadMcd (see GCBO)
+% eventdata  reserved - to be defined in a future version of MATLAB
+% handles    structure with handles and user data (see GUIDATA)
+
+% GUI for user to select _mcdespot_settings file
+[name path] = uigetfile('*.mat', 'Select _mcdespot_settings file');
+
+% Check for cancel or invalid selection
+if (name == 0)
+  textMessage(handles, 'err', '_mcdespot_settings.mat not selected.')
+  return;
+end
+
+handles.vvi.qmri.mcd.path = path;
+handles.vvi.qmri.mcd.name = name;
+
+% Call loadMCD to populate .qmri.mcd with new data
+handles = loadMCD(handles);
+
+% Set the loaded flag to mcDESPOT
+handles.vvi.qmri.loaded = 3;
+
+% Update handles structure
+guidata(hObject, handles);
+
+% =-=-=-=-=- END QMRI Mode Callbacks =-=-=-=-=-=-=
