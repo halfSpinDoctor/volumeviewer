@@ -1619,12 +1619,10 @@ if (handles.vvi.montage == 0) && (eventData.Button == 1) && (handles.vvi.textLoc
     DEBUG = 4;
     [fv rnrm] = mcdespot_model_fit(data_spgr_sl, data_ssfp_0_sl, data_ssfp_180_sl, mcd.mcdespot_settings.alpha_spgr, mcd.mcdespot_settings.alpha_ssfp, mcd.mcdespot_settings.tr_spgr, mcd.mcdespot_settings.tr_ssfp, fam_sl(:), omega_sl(:), ig, numThreads, DEBUG);
   
-  end
-  
-  % Display mcDESPOT Parameters at this location
-  fv = squeeze(handles.vvi.qmri.mcd.mcd_fv(selCoords(1), selCoords(2), selCoords(3), :));
-  disp(['  ' num2str(fv(1)*1000, '%03.0f') ' ms  | ' num2str(fv(2)*1000, '%04.0f') ' ms |   ' num2str(fv(3)*1000, '%02.0f') ' ms   |  ' num2str(fv(4)*1000, '%03.0f') ' ms | ' num2str(fv(5)*100, '%02.0f') '% | ' num2str(fv(6)*1000, '%03.0f') ' ms']);
-  
+    % Display mcDESPOT Parameters at this location
+    fv = squeeze(handles.vvi.qmri.mcd.mcd_fv(selCoords(1), selCoords(2), selCoords(3), :));
+    disp(['  ' num2str(fv(1)*1000, '%03.0f') ' ms  | ' num2str(fv(2)*1000, '%04.0f') ' ms |   ' num2str(fv(3)*1000, '%02.0f') ' ms   |  ' num2str(fv(4)*1000, '%03.0f') ' ms | ' num2str(fv(5)*100, '%02.0f') '% | ' num2str(fv(6)*1000, '%03.0f') ' ms']);  
+  end % if QMRI mode is on & loaded (...qmri.mode == 3)
  
 end
 
@@ -1782,9 +1780,17 @@ elseif ndims(img) < 3 %#ok<ISMAT>
   handles.vvi.imageSize(4) = 1;
 end
 
-% Take middle slice as current slice
-handles.vvi.currentSlice = round(size(img, 3)/2);
-set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
+% If matrix size of new image is same as old image, display same slice as before
+% if c 
+%   
+% else
+  % Take middle slice as current slice
+  handles.vvi.currentSlice = round(size(img, 3)/2);
+  set(handles.editSlice, 'String', num2str(handles.vvi.currentSlice));
+  
+% end
+
+
 
 % Take first phase as current phase
 handles.vvi.currentPhase = 1;
@@ -1911,19 +1917,22 @@ handles.vvi.qmri.mcd.contractHandle = figure;
 
 % Setup subplots for contraction steps
 
-% Contraction Step 1
+% Contraction Steps 1-4
 for ii = 1:4
   subplot(4,3,3*ii-2);
   xlabel('T1m [s]');
   ylabel('T1f [s]');
+  set(gca, 'clim', [0 5e-14]);
   
   subplot(4,3,3*ii-1);
   xlabel('T2m [s]');
   ylabel('T2f [s]');
+  set(gca, 'clim', [0 5e-14]);
   
   subplot(4,3,3*ii);
   xlabel('MWF');
   ylabel('Tau [s]');
+  set(gca, 'clim', [0 5e-14]);
 end
 
 disp('All mcDESPOT data, calibration, and parameter maps loaded.');
